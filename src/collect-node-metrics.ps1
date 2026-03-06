@@ -87,6 +87,8 @@ function Get-EnvironmentConfig {
         CollectWaitSeconds        = 90
         LogFilePrefix             = 'collect-node-metrics'
         ExcelInputFiles           = @()
+        ExcelInputDirectories     = @()
+        ExcelSearchRecurse        = $true
     }
 
     foreach ($key in $defaults.Keys) {
@@ -165,6 +167,44 @@ function Get-RowValue {
     return ''
 }
 
+function Resolve-NodeSourceFiles {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config
+    )
+
+    $resolved = New-Object System.Collections.Generic.List[string]
+
+    foreach ($path in @($Config.ExcelInputFiles)) {
+        if ([string]::IsNullOrWhiteSpace([string]$path)) { continue }
+        if (Test-Path -Path $path -PathType Leaf) {
+            $resolved.Add((Resolve-Path -Path $path).Path)
+        }
+        else {
+            Log -Level WARN -Message "Excel file path missing: ${path}"
+        }
+    }
+
+     = @('*.xlsx', '*.xlsm', '*.xls', '*.csv')
+    foreach ($dir in @($Config.ExcelInputDirectories)) {
+        if ([string]::IsNullOrWhiteSpace([string]$dir)) { continue }
+        if (-not (Test-Path -Path $dir -PathType Container)) {
+            Log -Level WARN -Message "Excel input directory missing: ${dir}"
+            continue
+        }
+
+        foreach ($pattern in $extensions) {
+            $items = Get-ChildItem -Path $dir -Filter $pattern -File -Recurse:$([bool]$Config.ExcelSearchRecurse) -ErrorAction SilentlyContinue
+            foreach ($item in $items) {
+                $resolved.Add($item.FullName)
+            }
+        }
+    }
+
+    return @($resolved | Sort-Object -Unique)
+}
+
 function Import-NodeListFromExcel {
     [CmdletBinding()]
     param(
@@ -173,10 +213,10 @@ function Import-NodeListFromExcel {
     )
 
     $allNodes = New-Object System.Collections.Generic.List[object]
-    $sourceFiles = @($Config.ExcelInputFiles)
+    $sourceFiles = @(Resolve-NodeSourceFiles -Config $Config)
 
     if (-not $sourceFiles -or $sourceFiles.Count -eq 0) {
-        throw 'Config key ExcelInputFiles must contain one or more .xlsx or .csv paths.'
+        throw 'No node source files found. Use ExcelInputFiles and/or ExcelInputDirectories in config.'
     }
 
     $importExcelAvailable = $false
@@ -645,7 +685,7 @@ try {
 
     Log -Message 'Startup'
     Log -Message "Using config: $($config.ConfigPath)"
-    Log -Message "Config summary: db=$($config.DatabasePath), raw=$($config.RawResultBaseDir), temp=$($config.TempDir), inputs=$(@($config.ExcelInputFiles).Count)"
+    Log -Message "Config summary: db=$($config.DatabasePath), raw=$($config.RawResultBaseDir), temp=$($config.TempDir), files=$(@($config.ExcelInputFiles).Count), dirs=$(@($config.ExcelInputDirectories).Count), recurse=$($config.ExcelSearchRecurse)"
 
     Initialize-Database -Config $config
 
@@ -747,4 +787,6 @@ catch {
     Log -Level ERROR -Message "Fatal error: $($_.Exception.Message)"
     exit 1
 }
+
+
 

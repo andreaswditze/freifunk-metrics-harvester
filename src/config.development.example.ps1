@@ -22,4 +22,7 @@ return @{
     ExcelInputFiles          = @(
         '/tmp/freifunk-metrics-harvester/temp/sample-nodes.csv'
     )
+
+    ExcelInputDirectories    = @()
+    ExcelSearchRecurse       = $true
 }

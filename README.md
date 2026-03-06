@@ -53,7 +53,7 @@ Install-Module ImportExcel -Scope CurrentUser
 For production on `mars`:
 
 1. Copy `src/config.demo.ps1` to `src/config.production.ps1`
-2. Adapt `ExcelInputFiles` and other local values
+2. Set either `ExcelInputFiles` and/or `ExcelInputDirectories` (recursive search supported)
 3. Keep `config.production.ps1` local only (ignored by git)
 
 ## Run
@@ -96,3 +96,4 @@ https://www.freifunk-nordhessen.de
 ## License
 MIT License
 Copyright (c) 2026 Andreas W. Ditze
+

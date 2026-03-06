@@ -19,8 +19,14 @@ return @{
     CollectWaitSeconds       = 90
     LogFilePrefix            = 'collect-node-metrics'
 
-    # One or more node list files. Supports .xlsx via ImportExcel module and .csv via built-in Import-Csv.
-    ExcelInputFiles          = @(
-        '/home/ffuser/skripte/freifunk-metrics-harvester/temp/nodes.xlsx'
+    # Optional explicit files.
+    ExcelInputFiles          = @()
+
+    # Recommended for FNDG/FCBT style trees.
+    ExcelInputDirectories    = @(
+        '/home/ffuser/skripte/fndg/twodrive'
     )
+
+    # Search directories recursively for *.xlsx, *.xlsm, *.xls, *.csv.
+    ExcelSearchRecurse       = $true
 }
