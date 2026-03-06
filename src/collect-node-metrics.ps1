@@ -22,6 +22,8 @@ $ErrorActionPreference = 'Stop'
 
 $script:CurrentConfig = $null
 $script:LogFilePath = $null
+$script:DailyLogDir = $null
+$script:DailyLogFilePath = $null
 
 function Log {
     [CmdletBinding()]
@@ -39,6 +41,28 @@ function Log {
     if ($script:LogFilePath) {
         Add-Content -Path $script:LogFilePath -Value $line
     }
+
+    if ($script:DailyLogFilePath) {
+        Add-Content -Path $script:DailyLogFilePath -Value $line
+    }
+}
+
+
+function Log-NodeAction {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Node,
+        [Parameter(Mandatory = $true)]
+        [string]$Action,
+        [string]$Detail = '',
+        [ValidateSet('INFO', 'WARN', 'ERROR', 'DEBUG')]
+        [string]$Level = 'INFO'
+    )
+
+    $safeDetail = $Detail.Replace('"', "'").Trim()
+    $message = 'NODE action={0} device_id={1} name="{2}" ip={3} domain={4} detail="{5}"' -f $Action, $Node.DeviceID, $Node.Name, $Node.IP, $Node.Domain, $safeDetail
+    Log -Level $Level -Message $message
 }
 
 function Get-EnvironmentConfig {
@@ -699,6 +723,11 @@ try {
     }
 
     $script:LogFilePath = Join-Path $config.LogDir ('{0}-{1}.log' -f $config.LogFilePrefix, (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $script:DailyLogDir = Join-Path $config.LogDir 'daily'
+    if (-not (Test-Path -Path $script:DailyLogDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $script:DailyLogDir -Force | Out-Null
+    }
+    $script:DailyLogFilePath = Join-Path $script:DailyLogDir ('node-actions-{0}.log' -f (Get-Date -Format 'yyyyMMdd'))
 
     Log -Message 'Startup'
     Log -Message "Using config: $($config.ConfigPath)"
@@ -726,6 +755,7 @@ try {
     Log -Message "Trigger phase start, nodes=$($nodes.Count)"
     foreach ($node in $nodes) {
         try {
+            Log-NodeAction -Node $node -Action 'trigger_start' -Detail 'attempting ssh trigger'
             $triggerResult = Invoke-NodeTriggerCommand -Config $config -Node $node -RunId $RunId
             $triggeredAtUtc = (Get-Date).ToUniversalTime().ToString('o')
 
@@ -734,15 +764,18 @@ try {
                 $triggeredNodes.Add($node)
                 Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'triggered' -TriggeredAtUtc $triggeredAtUtc -ResultFile $triggerResult.RemoteResultFile -ErrorFile $triggerResult.RemoteErrorFile
                 Log -Message "Node trigger success: $($node.IP)"
+                Log-NodeAction -Node $node -Action 'trigger_success' -Detail 'remote background job started'
             }
             else {
                 Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'trigger_failed' -TriggeredAtUtc $triggeredAtUtc -ErrorMessage $triggerResult.Error
                 Log -Level WARN -Message "Node trigger failed: $($node.IP) - $($triggerResult.Error)"
+                Log-NodeAction -Node $node -Action 'trigger_failed' -Detail $triggerResult.Error -Level WARN
             }
         }
         catch {
             Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'trigger_exception' -TriggeredAtUtc ((Get-Date).ToUniversalTime().ToString('o')) -ErrorMessage $_.Exception.Message
             Log -Level ERROR -Message "Node trigger exception for $($node.IP): $($_.Exception.Message)"
+            Log-NodeAction -Node $node -Action 'trigger_exception' -Detail $_.Exception.Message -Level ERROR
         }
     }
 
@@ -759,25 +792,30 @@ try {
     Log -Message "Collect phase start, nodes=$($triggeredNodes.Count)"
     foreach ($node in $triggeredNodes) {
         try {
+            Log-NodeAction -Node $node -Action 'collect_start' -Detail 'attempting result collection'
             $collect = Collect-NodeResults -Config $config -Node $node -RunId $RunId -RawDir $runInfo.RawDir
             $collectedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
 
             if (-not $collect.Success) {
                 Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_failed' -CollectedAtUtc $collectedAtUtc -ErrorMessage $collect.ErrorOutput
                 Log -Level WARN -Message "Node collect failed: $($node.IP) - $($collect.ErrorOutput)"
+                Log-NodeAction -Node $node -Action 'collect_failed' -Detail $collect.ErrorOutput -Level WARN
                 continue
             }
 
             $collectedCount++
             Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collected' -CollectedAtUtc $collectedAtUtc -ResultFile $collect.LocalResultPath -ErrorFile $collect.LocalErrorPath -ErrorMessage $collect.ErrorOutput
+            Log-NodeAction -Node $node -Action 'collect_success' -Detail ('result_file=' + $collect.LocalResultPath)
 
             $parsed = Parse-MeasurementOutput -RawOutput $collect.RawOutput
             if ($parsed) {
                 $parsedCount++
                 Log -Message "Parse success: ip=$($node.IP), nodeid=$($parsed.NodeId), throughput_mbit=$($parsed.ThroughputMbit)"
+                Log-NodeAction -Node $node -Action 'parse_success' -Detail ('nodeid=' + $parsed.NodeId + '; throughput_mbit=' + $parsed.ThroughputMbit)
             }
             else {
                 Log -Level WARN -Message "Parse failed for node $($node.IP), raw stored"
+                Log-NodeAction -Node $node -Action 'parse_failed' -Detail 'raw output stored, parser did not match' -Level WARN
             }
 
             Save-Measurement -Config $config -Node $node -RunId $RunId -RawOutput $collect.RawOutput -ParsedMeasurement $parsed
@@ -785,6 +823,7 @@ try {
         catch {
             Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_exception' -CollectedAtUtc ((Get-Date).ToUniversalTime().ToString('o')) -ErrorMessage $_.Exception.Message
             Log -Level ERROR -Message "Collect exception for $($node.IP): $($_.Exception.Message)"
+            Log-NodeAction -Node $node -Action 'collect_exception' -Detail $_.Exception.Message -Level ERROR
         }
     }
 
@@ -804,8 +843,3 @@ catch {
     Log -Level ERROR -Message "Fatal error: $($_.Exception.Message)"
     exit 1
 }
-
-
-
-
-
