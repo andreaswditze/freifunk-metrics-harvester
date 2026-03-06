@@ -97,3 +97,24 @@ https://www.freifunk-nordhessen.de
 MIT License
 Copyright (c) 2026 Andreas W. Ditze
 
+
+
+## Testing mode
+For controlled operational testing without Excel import, set in `config.production.ps1`:
+
+```powershell
+UseTestNodeIPs = $true
+TestNodeIPs    = @(
+    '2a03:2260:3013:200:7a8a:20ff:fed0:747a'
+    '2a03:2260:3013:200:1ae8:29ff:fe5c:1ff8'
+)
+```
+
+In this mode, the script only targets the configured `TestNodeIPs`.
+
+## Pester tests
+Run unit tests:
+
+```powershell
+pwsh -NoProfile -Command "Invoke-Pester ./tests"
+```

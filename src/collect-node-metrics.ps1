@@ -14,7 +14,8 @@ Designed for PowerShell 7 on Linux and non-interactive execution via cron/system
 param(
     [string]$ConfigPath,
     [string]$RunId,
-    [switch]$VerboseLogging
+    [switch]$VerboseLogging,
+    [switch]$NoRun
 )
 
 Set-StrictMode -Version Latest
@@ -113,6 +114,8 @@ function Get-EnvironmentConfig {
         ExcelInputFiles           = @()
         ExcelInputDirectories     = @()
         ExcelSearchRecurse        = $true
+        UseTestNodeIPs            = $false
+        TestNodeIPs               = @('2a03:2260:3013:200:7a8a:20ff:fed0:747a','2a03:2260:3013:200:1ae8:29ff:fe5c:1ff8')
     }
 
     foreach ($key in $defaults.Keys) {
@@ -228,6 +231,37 @@ function Resolve-NodeSourceFiles {
     return @($resolved | Sort-Object -Unique)
 }
 
+function Get-TestNodesFromConfig {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config
+    )
+
+    $normalized = @(
+        @($Config.TestNodeIPs) |
+            ForEach-Object { Get-NormalizedIP -IP ([string]$_) } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+    )
+
+    $nodes = New-Object System.Collections.Generic.List[object]
+    $index = 1
+    foreach ($ip in $normalized) {
+        $nodes.Add([pscustomobject]@{
+            DeviceID = 'test-{0:d3}' -f $index
+            Name     = 'TestNode-{0:d3}' -f $index
+            IP       = $ip
+            Domain   = 'testing'
+        })
+        $index++
+    }
+
+    return [pscustomobject]@{
+        Nodes       = $nodes.ToArray()
+        SourceFiles = @('<test-node-ips>')
+    }
+}
 function Import-NodeListFromExcel {
     [CmdletBinding()]
     param(
@@ -712,6 +746,7 @@ function Insert-NodeJobRecord {
     Invoke-Sqlite -Config $Config -Sql $sql | Out-Null
 }
 
+if (-not $NoRun) {
 try {
     $config = Get-EnvironmentConfig -RequestedPath $ConfigPath
     $script:CurrentConfig = $config
@@ -731,11 +766,19 @@ try {
 
     Log -Message 'Startup'
     Log -Message "Using config: $($config.ConfigPath)"
-    Log -Message "Config summary: db=$($config.DatabasePath), raw=$($config.RawResultBaseDir), temp=$($config.TempDir), files=$(@($config.ExcelInputFiles).Count), dirs=$(@($config.ExcelInputDirectories).Count), recurse=$($config.ExcelSearchRecurse)"
+    Log -Message "Config summary: db=$($config.DatabasePath), raw=$($config.RawResultBaseDir), temp=$($config.TempDir), files=$(@($config.ExcelInputFiles).Count), dirs=$(@($config.ExcelInputDirectories).Count), recurse=$($config.ExcelSearchRecurse), test_mode=$($config.UseTestNodeIPs), test_ips=$(@($config.TestNodeIPs).Count)"
 
     Initialize-Database -Config $config
 
-    $importResult = Import-NodeListFromExcel -Config $config
+    $importResult = $null
+    if ($config.UseTestNodeIPs) {
+        $importResult = Get-TestNodesFromConfig -Config $config
+        Log -Message "Testing mode enabled: using TestNodeIPs only, count=$(@($importResult.Nodes).Count)"
+    }
+    else {
+        $importResult = Import-NodeListFromExcel -Config $config
+    }
+
     $nodes = @($importResult.Nodes)
 
     if ($nodes.Count -eq 0) {
@@ -843,3 +886,5 @@ catch {
     Log -Level ERROR -Message "Fatal error: $($_.Exception.Message)"
     exit 1
 }
+}
+

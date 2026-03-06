@@ -25,4 +25,11 @@ return @{
 
     ExcelInputDirectories    = @()
     ExcelSearchRecurse       = $true
+    # Testing mode: bypass Excel import and run only against these IPs.
+    UseTestNodeIPs          = $false
+    TestNodeIPs             = @(
+        '2a03:2260:3013:200:7a8a:20ff:fed0:747a'
+        '2a03:2260:3013:200:1ae8:29ff:fe5c:1ff8'
+    )
 }
+
