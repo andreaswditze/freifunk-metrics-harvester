@@ -66,6 +66,27 @@ function Log-NodeAction {
     Log -Level $Level -Message $message
 }
 
+function Wait-WithProgress {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$Seconds,
+        [string]$Activity = 'Waiting before collect phase'
+    )
+
+    if ($Seconds -le 0) {
+        return
+    }
+
+    for ($elapsed = 0; $elapsed -lt $Seconds; $elapsed++) {
+        $remaining = $Seconds - $elapsed
+        $percent = [int](($elapsed / [double]$Seconds) * 100)
+        Write-Progress -Activity $Activity -Status ('Remaining: {0}s' -f $remaining) -PercentComplete $percent
+        Start-Sleep -Seconds 1
+    }
+
+    Write-Progress -Activity $Activity -Completed
+}
 function Get-EnvironmentConfig {
     [CmdletBinding()]
     param(
@@ -826,7 +847,7 @@ try {
 
     if ($config.CollectWaitSeconds -gt 0) {
         Log -Message "Waiting $($config.CollectWaitSeconds)s before collect phase"
-        Start-Sleep -Seconds $config.CollectWaitSeconds
+        Wait-WithProgress -Seconds $config.CollectWaitSeconds -Activity 'Waiting before collect phase'
     }
 
     $collectedCount = 0
@@ -887,4 +908,5 @@ catch {
     exit 1
 }
 }
+
 
