@@ -231,7 +231,13 @@ function Import-NodeListFromExcel {
         }
 
         $extension = [IO.Path]::GetExtension($filePath).ToLowerInvariant()
+        $baseName = [IO.Path]::GetFileName($filePath)
         $rows = @()
+
+        if ($baseName -match '(?i)^vorlage_.*\\.xlsx$') {
+            Log -Level WARN -Message "Skipping template workbook by naming rule: ${filePath}"
+            continue
+        }
 
         if ($extension -eq '.csv') {
             $rows = Import-Csv -Path $filePath
@@ -240,7 +246,19 @@ function Import-NodeListFromExcel {
             if (-not $importExcelAvailable) {
                 throw 'Module ImportExcel is required for .xlsx imports. Install with: Install-Module ImportExcel -Scope CurrentUser'
             }
-            $rows = Import-Excel -Path $filePath
+
+            try {
+                $rows = Import-Excel -Path $filePath
+            }
+            catch {
+                $message = $_.Exception.Message
+                if ($message -match 'No column headers found on top row') {
+                    Log -Level WARN -Message "Skipping workbook without header row: ${filePath}"
+                    continue
+                }
+
+                throw
+            }
         }
         else {
             Log -Level WARN -Message "Skipping unsupported file extension: ${filePath}"
@@ -786,6 +804,7 @@ catch {
     Log -Level ERROR -Message "Fatal error: $($_.Exception.Message)"
     exit 1
 }
+
 
 
 
