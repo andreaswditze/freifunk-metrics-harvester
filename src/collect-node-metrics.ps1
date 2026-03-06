@@ -100,6 +100,46 @@ function Convert-ToTrimmedString {
 
     return ([string]$Value).Trim()
 }
+function Convert-NodeTimestampToUtc {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [string]$Timestamp
+    )
+
+    $raw = Convert-ToTrimmedString -Value $Timestamp
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return ''
+    }
+
+    if ($raw -notmatch '^[0-9]+$') {
+        return ''
+    }
+
+    try {
+        $epoch = Get-Date -Date '1970-01-01T00:00:00Z'
+        $value = [double]$raw
+        $utc = $null
+
+        if ($raw.Length -le 10) {
+            $utc = $epoch.AddSeconds($value)
+        }
+        elseif ($raw.Length -le 13) {
+            $utc = $epoch.AddMilliseconds($value)
+        }
+        elseif ($raw.Length -le 16) {
+            $utc = $epoch.AddMilliseconds($value / 1000.0)
+        }
+        else {
+            $utc = $epoch.AddMilliseconds($value / 1000000.0)
+        }
+
+        return $utc.ToUniversalTime().ToString('o')
+    }
+    catch {
+        return ''
+    }
+}
 function Get-EnvironmentConfig {
     [CmdletBinding()]
     param(
@@ -719,7 +759,7 @@ function Save-Measurement {
         $target = Escape-SqlLiteral -Value $ParsedMeasurement.Target
         $throughput = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.00}', $ParsedMeasurement.ThroughputMbit)
         $tsNs = Escape-SqlLiteral -Value $ParsedMeasurement.TimestampNs
-        $measuredAtUtc = (Get-Date -Date '1970-01-01T00:00:00Z').AddMilliseconds([double]$ParsedMeasurement.TimestampNs / 1000000).ToUniversalTime().ToString('o')
+        $measuredAtUtc = Convert-NodeTimestampToUtc -Timestamp $ParsedMeasurement.TimestampNs
     }
 
     $measuredAtEsc = Escape-SqlLiteral -Value $measuredAtUtc
@@ -921,6 +961,7 @@ catch {
     exit 1
 }
 }
+
 
 
 

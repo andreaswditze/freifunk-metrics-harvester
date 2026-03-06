@@ -66,3 +66,15 @@ Describe 'Get-TestNodesFromConfig' {
         $result.SourceFiles[0] | Should -Be '<test-node-ips>'
     }
 }
+Describe 'Convert-NodeTimestampToUtc' {
+    It 'handles epoch seconds from nodes' {
+        $utc = Convert-NodeTimestampToUtc -Timestamp '1772839860'
+        $utc | Should -Be '2026-03-06T23:31:00.0000000Z'
+    }
+
+    It 'handles nanoseconds' {
+        $utc = Convert-NodeTimestampToUtc -Timestamp '1772839860123456789'
+        $utc | Should -Match '^2026-03-06T23:31:00\.123'
+    }
+}
+
