@@ -1,61 +1,98 @@
 # freifunk-metrics-harvester
 
-freifunk-metrics-harvester collects performance and operational metrics from Freifunk Gluon nodes.
+Minimalistic PowerShell 7 harvester for Freifunk node performance measurements.
 
-A central collector runs on a server and actively retrieves metrics from nodes across the network.
-The collected data is stored locally for later analysis and pushed to InfluxDB for time-series monitoring.
+## Purpose
+This project runs a two-phase measurement flow against Gluon nodes:
 
-The goal of this project is to detect network performance bottlenecks from the end-user perspective
-as early as possible across the entire Freifunk network.
+1. Trigger speed tests asynchronously on reachable nodes.
+2. Reconnect, collect result files, parse output, and store data in SQLite.
 
-This repository also contains the node-side code that runs on Gluon devices to expose or generate
-the required metrics.
+The result data is intended for network bottleneck detection from end-user perspective.
 
 ## Architecture
-
 Freifunk Node (Gluon)
-        │
-        │ metrics / tests
-        ▼
-Central Collector
-        │
-        ├── Local metric storage
-        │
-        └── InfluxDB (time series metrics)
+        |
+        | SSH trigger + result collection
+        v
+Central Collector (PowerShell 7)
+        |
+        +-- Local raw files
+        +-- SQLite metrics database
 
-## Components
+## Repository rules
+Allowed in git:
+- `src/config.demo.ps1`
+- `src/config.development.example.ps1`
 
-Server-side collector
-- retrieves metrics from Freifunk nodes
-- runs network performance tests
-- stores raw metrics locally
-- pushes processed metrics to InfluxDB
+Never commit:
+- `src/config.production.ps1`
+- `src/config.production.*`
 
-Node-side components
-- lightweight scripts running on Gluon nodes
-- expose metrics and measurement endpoints
-- support network performance measurements
+## Requirements
+- Linux host with PowerShell 7 (`pwsh`)
+- `ssh`, `scp`, `sqlite3`
+- Optional: PowerShell module `ImportExcel` for `.xlsx` input files
 
-## Goal
+Install ImportExcel if needed:
 
-Provide network-wide observability for Freifunk deployments in order to:
+```powershell
+Install-Module ImportExcel -Scope CurrentUser
+```
 
-- identify throughput bottlenecks
-- detect degraded links early
-- observe network performance trends
-- support future automated analysis
+## Project structure
+- `src/collect-node-metrics.ps1`: main application
+- `src/config.demo.ps1`: documented production defaults for host `mars`
+- `src/config.development.example.ps1`: development template
+- `docs/database-schema.md`: schema documentation
+- `data/raw/`: collected raw result files by run id
+- `log/`: log files
+- `temp/`: temporary files and optional input staging
 
-## Status
+## Configuration
+For production on `mars`:
 
-Early stage development.
+1. Copy `src/config.demo.ps1` to `src/config.production.ps1`
+2. Adapt `ExcelInputFiles` and other local values
+3. Keep `config.production.ps1` local only (ignored by git)
+
+## Run
+
+```powershell
+pwsh ./src/collect-node-metrics.ps1
+```
+
+Optional:
+
+```powershell
+pwsh ./src/collect-node-metrics.ps1 -ConfigPath ./src/config.development.example.ps1 -RunId run-20260306-220000
+```
+
+## Runtime flow
+- Startup, config summary, database initialization
+- Excel import (`DeviceID`, `Name`, `IP`, `Domain`)
+- Trigger phase (`ssh`):
+  - `mkdir -p /tmp/harvester`
+  - start exact wget/awk payload in background
+  - write `<runid>.result` and `<runid>.error`
+- Collect phase (`scp`, fallback `ssh cat`)
+- Parse Influx line protocol output (`download_mbit`, `nodeid`, `target`, timestamp)
+- Store raw + parsed values in SQLite (`nodes`, `runs`, `node_jobs`, `measurements`)
+- Final run summary in log
+
+## Logging format
+All log lines follow:
+
+`DD.MM.YYYY HH:mm:ss: [LEVEL] message`
+
+## Cron/systemd readiness
+The script is non-interactive and can be called directly from cron or a systemd timer.
 
 ## About
-
 This project is developed for and used by Freifunk Nordhessen e.V.
 
 https://www.freifunk-nordhessen.de
 
 ## License
-
 MIT License
 Copyright (c) 2026 Andreas W. Ditze

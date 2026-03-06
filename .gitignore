@@ -1,0 +1,11 @@
+/src/config.production.*
+/src/config.production.ps1
+/data/*
+!/data/.gitkeep
+!/data/raw/
+/data/raw/*
+!/data/raw/.gitkeep
+/log/*
+!/log/.gitkeep
+/temp/*
+!/temp/.gitkeep
