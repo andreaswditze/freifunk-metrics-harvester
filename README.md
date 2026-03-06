@@ -1,24 +1,12 @@
 # freifunk-metrics-harvester
 
-Minimalistic PowerShell 7 harvester for Freifunk node performance measurements.
+PowerShell 7 collector for distributed Freifunk node performance measurements.
 
 ## Purpose
-This project runs a two-phase measurement flow against Gluon nodes:
+The collector runs in two phases:
 
-1. Trigger speed tests asynchronously on reachable nodes.
+1. Trigger asynchronous speed measurements on reachable Gluon nodes.
 2. Reconnect, collect result files, parse output, and store data in SQLite.
-
-The result data is intended for network bottleneck detection from end-user perspective.
-
-## Architecture
-Freifunk Node (Gluon)
-        |
-        | SSH trigger + result collection
-        v
-Central Collector (PowerShell 7)
-        |
-        +-- Local raw files
-        +-- SQLite metrics database
 
 ## Repository rules
 Allowed in git:
@@ -30,91 +18,69 @@ Never commit:
 - `src/config.production.*`
 
 ## Requirements
-- Linux host with PowerShell 7 (`pwsh`)
+- Linux host (`mars`) with PowerShell 7 (`pwsh`)
 - `ssh`, `scp`, `sqlite3`
-- Optional: PowerShell module `ImportExcel` for `.xlsx` input files
+- PowerShell modules:
+  - `ImportExcel` (for `.xlsx` node files)
+  - `Pester` (for tests)
 
-Install ImportExcel if needed:
+## Quickstart on mars
+```bash
+ssh ffuser@mars
+cd /home/ffuser/skripte
 
-```powershell
-Install-Module ImportExcel -Scope CurrentUser
+# first time
+git clone https://github.com/andreaswditze/freifunk-metrics-harvester.git
+cd freifunk-metrics-harvester
+
+# updates
+# git pull --ff-only origin main
 ```
 
-## Project structure
-- `src/collect-node-metrics.ps1`: main application
-- `src/config.demo.ps1`: documented production defaults for host `mars`
-- `src/config.development.example.ps1`: development template
-- `docs/database-schema.md`: schema documentation
-- `data/raw/`: collected raw result files by run id
-- `log/`: log files
-- `temp/`: temporary files and optional input staging
+Create local production config:
+```bash
+cp src/config.demo.ps1 src/config.production.ps1
+```
 
-## Configuration
-For production on `mars`:
-
-1. Copy `src/config.demo.ps1` to `src/config.production.ps1`
-2. Set either `ExcelInputFiles` and/or `ExcelInputDirectories` (recursive search supported)
-3. Keep `config.production.ps1` local only (ignored by git)
-
-## Run
-
-```powershell
+Run collector:
+```bash
 pwsh ./src/collect-node-metrics.ps1
 ```
 
-Optional:
+## Configuration
+Use `src/config.production.ps1` locally on mars.
 
-```powershell
-pwsh ./src/collect-node-metrics.ps1 -ConfigPath ./src/config.development.example.ps1 -RunId run-20260306-220000
+Excel mode (default):
+- `ExcelInputFiles`
+- `ExcelInputDirectories`
+- `ExcelSearchRecurse`
+
+Test-IP mode (bypass Excel import):
+- `UseTestNodeIPs = $true`
+- `TestNodeIPs = @(...)`
+
+Default test IPs are preconfigured:
+- `2a03:2260:3013:200:7a8a:20ff:fed0:747a`
+- `2a03:2260:3013:200:1ae8:29ff:fe5c:1ff8`
+
+## Logging
+- Main run log: `log/<prefix>-YYYYMMDD-HHMMSS.log`
+- Daily node action log: `log/daily/node-actions-YYYYMMDD.log`
+
+Node action log includes timestamped events like:
+- `trigger_start`, `trigger_success`, `trigger_failed`
+- `collect_start`, `collect_success`, `collect_failed`
+- `parse_success`, `parse_failed`
+
+## Tests (Pester)
+Run:
+```bash
+pwsh ./tests/Invoke-Tests.ps1
 ```
 
-## Runtime flow
-- Startup, config summary, database initialization
-- Excel import (`DeviceID`, `Name`, `IP`, `Domain`)
-- Trigger phase (`ssh`):
-  - `mkdir -p /tmp/harvester`
-  - start exact wget/awk payload in background
-  - write `<runid>.result` and `<runid>.error`
-- Collect phase (`scp`, fallback `ssh cat`)
-- Parse Influx line protocol output (`download_mbit`, `nodeid`, `target`, timestamp)
-- Store raw + parsed values in SQLite (`nodes`, `runs`, `node_jobs`, `measurements`)
-- Final run summary in log
-
-## Logging format
-All log lines follow:
-
-`DD.MM.YYYY HH:mm:ss: [LEVEL] message`
-
-## Cron/systemd readiness
-The script is non-interactive and can be called directly from cron or a systemd timer.
-
-## About
-This project is developed for and used by Freifunk Nordhessen e.V.
-
-https://www.freifunk-nordhessen.de
+## Documentation
+- `docs/mars-runbook.md` (operations, deploy, updates, tests)
+- `docs/database-schema.md` (SQLite schema)
 
 ## License
 MIT License
-Copyright (c) 2026 Andreas W. Ditze
-
-
-
-## Testing mode
-For controlled operational testing without Excel import, set in `config.production.ps1`:
-
-```powershell
-UseTestNodeIPs = $true
-TestNodeIPs    = @(
-    '2a03:2260:3013:200:7a8a:20ff:fed0:747a'
-    '2a03:2260:3013:200:1ae8:29ff:fe5c:1ff8'
-)
-```
-
-In this mode, the script only targets the configured `TestNodeIPs`.
-
-## Pester tests
-Run unit tests:
-
-```powershell
-pwsh -NoProfile -Command "Invoke-Pester ./tests"
-```
