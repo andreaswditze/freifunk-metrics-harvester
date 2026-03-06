@@ -185,8 +185,7 @@ function Resolve-NodeSourceFiles {
             Log -Level WARN -Message "Excel file path missing: ${path}"
         }
     }
-
-     = @('*.xlsx', '*.xlsm', '*.xls', '*.csv')
+    $extensions = @('*.xlsx', '*.xlsm', '*.xls', '*.csv')
     foreach ($dir in @($Config.ExcelInputDirectories)) {
         if ([string]::IsNullOrWhiteSpace([string]$dir)) { continue }
         if (-not (Test-Path -Path $dir -PathType Container)) {
@@ -787,6 +786,7 @@ catch {
     Log -Level ERROR -Message "Fatal error: $($_.Exception.Message)"
     exit 1
 }
+
 
 
 
