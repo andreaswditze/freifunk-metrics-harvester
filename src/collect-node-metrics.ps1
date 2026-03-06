@@ -700,8 +700,14 @@ function Parse-MeasurementOutput {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
         [string]$RawOutput
     )
+
+
+    if ([string]::IsNullOrWhiteSpace($RawOutput)) {
+        return $null
+    }
 
     $line = ($RawOutput -split "`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
     if (-not $line) {
@@ -961,6 +967,7 @@ catch {
     exit 1
 }
 }
+
 
 
 

@@ -20,6 +20,11 @@ Describe 'Parse-MeasurementOutput' {
     }
 }
 
+    It 'returns null for empty payload' {
+        $parsed = Parse-MeasurementOutput -RawOutput ''
+        $parsed | Should -BeNullOrEmpty
+    }
+
 Describe 'Resolve-NodeSourceFiles' {
     It 'finds Excel and CSV files recursively' {
         $nested = Join-Path $TestDrive 'a/b/c'
