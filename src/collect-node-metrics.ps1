@@ -61,7 +61,7 @@ function Log-NodeAction {
         [string]$Level = 'INFO'
     )
 
-    $safeDetail = $Detail.Replace('"', "'").Trim()
+    $safeDetail = Convert-ToTrimmedString -Value $Detail; $safeDetail = $safeDetail.Replace('"', "'")
     $message = 'NODE action={0} device_id={1} name="{2}" ip={3} domain={4} detail="{5}"' -f $Action, $Node.DeviceID, $Node.Name, $Node.IP, $Node.Domain, $safeDetail
     Log -Level $Level -Message $message
 }
@@ -86,6 +86,19 @@ function Wait-WithProgress {
     }
 
     Write-Progress -Activity $Activity -Completed
+}
+function Convert-ToTrimmedString {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [object]$Value
+    )
+
+    if ($null -eq $Value) {
+        return ''
+    }
+
+    return ([string]$Value).Trim()
 }
 function Get-EnvironmentConfig {
     [CmdletBinding()]
@@ -638,8 +651,8 @@ function Collect-NodeResults {
         Success         = $true
         LocalResultPath = $localResultPath
         LocalErrorPath  = $localErrorPath
-        RawOutput       = $rawOutput.Trim()
-        ErrorOutput     = $errorOutput.Trim()
+        RawOutput       = Convert-ToTrimmedString -Value $rawOutput
+        ErrorOutput     = Convert-ToTrimmedString -Value $errorOutput
     }
 }
 
@@ -908,5 +921,6 @@ catch {
     exit 1
 }
 }
+
 
 
