@@ -833,7 +833,30 @@ function Get-NodeTriggerCommandInfo {
     $targetBytes = [Math]::Max(1, [int64]$Config.SpeedtestTargetBytes)
 
     $payload = @"
-start=`$(date +%s%N); nodeid=`$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac); target_url='$targetUrlShell'; delay=`$(awk 'BEGIN{srand(); print int(rand()*$delayUpperBound)}'); sleep "`$delay"; t0=`$(date +%s.%N); wget -O /dev/null -q "`$target_url"; t1=`$(date +%s.%N); awk -v nodeid="`$nodeid" -v start="`$start" -v t0="`$t0" -v t1="`$t1" -v target="`$target_url" 'BEGIN{bytes=$targetBytes; sec=t1-t0; printf "speedtest,nodeid=%s download_mbit=%.2f,target=\"%s\" %s\n",nodeid,(bytes*8)/(sec*1000000),target,start}'
+start=`$(date +%s%N)
+nodeid=`$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac)
+target_url='$targetUrlShell'
+delay=`$(awk 'BEGIN{srand(); print int(rand()*$delayUpperBound)}')
+sleep "`$delay"
+wget_exit_file="/tmp/harvester-wget-exit-`$$.txt"
+rm -f "`$wget_exit_file"
+t0=`$(date +%s.%N)
+bytes=`$({ wget -O - -q "`$target_url"; printf '%s' "`$?" > "`$wget_exit_file"; } | wc -c)
+t1=`$(date +%s.%N)
+wget_exit=`$(cat "`$wget_exit_file" 2>/dev/null)
+rm -f "`$wget_exit_file"
+awk -v nodeid="`$nodeid" -v start="`$start" -v t0="`$t0" -v t1="`$t1" -v target="`$target_url" -v bytes="`$bytes" -v wget_exit="`$wget_exit" -v expected_bytes="$targetBytes" 'BEGIN{
+    sec=t1-t0
+    if (wget_exit != 0) {
+        printf "wget_failed exit=%s bytes=%s expected_bytes=%s target=\"%s\" start=%s\n",wget_exit,bytes,expected_bytes,target,start
+        exit 0
+    }
+    if (bytes <= 0 || sec <= 0) {
+        printf "speedtest_invalid bytes=%s sec=%s expected_bytes=%s target=\"%s\" start=%s\n",bytes,sec,expected_bytes,target,start
+        exit 0
+    }
+    printf "speedtest,nodeid=%s download_mbit=%.2f,target=\"%s\" %s\n",nodeid,(bytes*8)/(sec*1000000),target,start
+}'
 "@
     $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $Config.RemoteResultDir
     $triggerCmd = "mkdir -p '$remoteDirEscaped'; ts=`$(date +%s%N); out='$remoteDirEscaped/'`$ts.txt; ( $payload ) > `"`$out`" 2>&1 &"
