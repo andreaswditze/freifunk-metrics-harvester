@@ -97,6 +97,12 @@ Result file behavior on nodes:
 
 ```bash
 cd /home/ffuser/skripte/freifunk-metrics-harvester
+pwsh ./Invoke-Tests.ps1
+```
+
+Alternative direct runner:
+
+```bash
 pwsh ./tests/Invoke-Tests.ps1
 ```
 
@@ -116,3 +122,4 @@ pwsh ./tests/Invoke-Tests.ps1 -OutputFormat NUnitXml -OutputPath ./temp/test-res
   validate key, node reachability, and `root` login policy on target nodes.
 - Empty run:
   check `UseTestNodeIPs` vs Excel settings and inspect startup config summary log.
+

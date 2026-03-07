@@ -73,7 +73,12 @@ Node action log includes timestamped events like:
 - `parse_success`, `parse_failed`
 
 ## Tests (Pester)
-Run:
+Run all Pester tests from repo root:
+```bash
+pwsh ./Invoke-Tests.ps1
+```
+
+Alternative direct runner:
 ```bash
 pwsh ./tests/Invoke-Tests.ps1
 ```
