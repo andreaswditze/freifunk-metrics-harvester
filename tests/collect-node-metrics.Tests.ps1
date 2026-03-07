@@ -167,6 +167,34 @@ Describe 'Get-NodeTriggerCommandInfo' {
 }
 
 
+
+Describe 'Speedtest target integration' {
+    It 'downloads the configured speedtest file with the expected length' -Tag 'integration' {
+        $config = @{
+            SpeedtestTargetUrl   = 'https://fsn1-speed.hetzner.com/100MB.bin'
+            SpeedtestTargetBytes = 104857600
+        }
+
+        $downloadPath = Join-Path $TestDrive 'speedtest-target.bin'
+
+        try {
+            Invoke-WebRequest `
+                -Uri $config.SpeedtestTargetUrl `
+                -OutFile $downloadPath `
+                -MaximumRetryCount 2 `
+                -RetryIntervalSec 5 `
+                -TimeoutSec 300 | Out-Null
+
+            (Get-Item -Path $downloadPath).Length | Should -Be $config.SpeedtestTargetBytes
+        }
+        finally {
+            if (Test-Path -Path $downloadPath) {
+                Remove-Item -Path $downloadPath -Force
+            }
+        }
+    }
+}
+
 Describe 'Assert-ValidConfig' {
     It 'normalizes valid config values' {
         $config = @{
