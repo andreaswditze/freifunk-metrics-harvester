@@ -669,7 +669,7 @@ function Collect-NodeResults {
 
     $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
     $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $Config.RemoteResultDir
-    $listCmd = "find '$remoteDirEscaped' -maxdepth 1 -type f -print | sort"
+    $listCmd = "find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort"
 
     $listOutput = & $Config.SshBinary @sshArgs $listCmd 2>&1
     $listExit = $LASTEXITCODE
@@ -703,8 +703,8 @@ function Collect-NodeResults {
     }
 
     $safeIp = Get-SafeFileNamePart -Value $Node.IP
-    $downloaded = New-Object System.Collections.Generic.List[object]
-    $downloadErrors = New-Object System.Collections.Generic.List[string]
+    $downloaded = @()
+    $downloadErrors = @()
 
     foreach ($remoteFile in $remoteFiles) {
         $remoteFileEscaped = Convert-ToShellSingleQuoted -Value $remoteFile
@@ -716,7 +716,7 @@ function Collect-NodeResults {
         $catExit = $LASTEXITCODE
 
         if ($catExit -ne 0) {
-            $downloadErrors.Add(("cat failed for {0}: {1}" -f $remoteFile, ($catOutput -join ' ')))
+            $downloadErrors += ("cat failed for {0}: {1}" -f $remoteFile, ($catOutput -join ' '))
             continue
         }
 
@@ -727,11 +727,11 @@ function Collect-NodeResults {
             $rawOutput = Get-Content -Path $localPath -Raw
         }
 
-        $downloaded.Add([pscustomobject]@{
+        $downloaded += [pscustomobject]@{
             RemotePath = $remoteFile
             LocalPath  = $localPath
             RawOutput  = Convert-ToTrimmedString -Value $rawOutput
-        })
+        }
     }
 
     if ($downloaded.Count -eq 0) {
@@ -740,7 +740,7 @@ function Collect-NodeResults {
             LocalResultPath = ''
             LocalErrorPath  = ''
             RawOutput       = ''
-            ErrorOutput     = ($downloadErrors.ToArray() -join ' | ')
+            ErrorOutput     = (@($downloadErrors) -join ' | ')
             Files           = @()
         }
     }
@@ -752,7 +752,7 @@ function Collect-NodeResults {
         LocalResultPath = $firstFile.LocalPath
         LocalErrorPath  = ''
         RawOutput       = $firstFile.RawOutput
-        ErrorOutput     = ($downloadErrors.ToArray() -join ' | ')
+        ErrorOutput     = (@($downloadErrors) -join ' | ')
         Files           = @($downloaded)
     }
 }
