@@ -211,6 +211,7 @@ function Get-EnvironmentConfig {
         SQLiteBinary              = 'sqlite3'
         RemoteResultDir           = '/tmp/harvester'
         SshConnectTimeoutSeconds  = 8
+        TriggerParallelism        = 10
         CollectWaitSeconds        = 90
         LogFilePrefix             = 'collect-node-metrics'
         ExcelInputFiles           = @()
@@ -645,6 +646,28 @@ function New-SshArgs {
     )
 }
 
+function Get-NodeTriggerCommandInfo {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config
+    )
+
+    $remoteResultPattern = "$($Config.RemoteResultDir)/*.txt"
+
+    $payload = @'
+start=$(date +%s%N); nodeid=$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac); t0=$(date +%s.%N); wget -O /dev/null -q https://fsn1-speed.hetzner.com/100MB.bin; t1=$(date +%s.%N); awk -v nodeid="$nodeid" -v start="$start" -v t0="$t0" -v t1="$t1" 'BEGIN{bytes=104857600; target="https://fsn1-speed.hetzner.com/100MB.bin"; sec=t1-t0; printf "speedtest,nodeid=%s download_mbit=%.2f,target=\"%s\" %s\n",nodeid,(bytes*8)/(sec*1000000),target,start}'
+'@
+    $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $Config.RemoteResultDir
+    $triggerCmd = "mkdir -p '$remoteDirEscaped'; ts=`$(date +%s%N); out='$remoteDirEscaped/'`$ts.txt; ( $payload ) > `"`$out`" 2>&1 &"
+
+    return [pscustomobject]@{
+        RemoteResultFile = $remoteResultPattern
+        RemoteErrorFile  = ''
+        TriggerCommand   = $triggerCmd
+    }
+}
+
 function Invoke-NodeTriggerCommand {
     [CmdletBinding()]
     param(
@@ -655,24 +678,18 @@ function Invoke-NodeTriggerCommand {
         [Parameter(Mandatory = $true)]
         [string]$RunId
     )
-    $remoteResultPattern = "$($Config.RemoteResultDir)/*.txt"
 
-    $payload = @'
-start=$(date +%s%N); nodeid=$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac); t0=$(date +%s.%N); wget -O /dev/null -q https://fsn1-speed.hetzner.com/100MB.bin; t1=$(date +%s.%N); awk -v nodeid="$nodeid" -v start="$start" -v t0="$t0" -v t1="$t1" 'BEGIN{bytes=104857600; target="https://fsn1-speed.hetzner.com/100MB.bin"; sec=t1-t0; printf "speedtest,nodeid=%s download_mbit=%.2f,target=\"%s\" %s\n",nodeid,(bytes*8)/(sec*1000000),target,start}'
-'@
-    $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $Config.RemoteResultDir
-    $triggerCmd = "mkdir -p '$remoteDirEscaped'; ts=`$(date +%s%N); out='$remoteDirEscaped/'`$ts.txt; ( $payload ) > `"`$out`" 2>&1 &"
-
+    $triggerInfo = Get-NodeTriggerCommandInfo -Config $Config
     $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
-    $output = & $Config.SshBinary @sshArgs $triggerCmd 2>&1
+    $output = & $Config.SshBinary @sshArgs $triggerInfo.TriggerCommand 2>&1
     $exitCode = $LASTEXITCODE
 
     if ($exitCode -ne 0) {
         return [pscustomobject]@{
             Reachable        = $false
             Triggered        = $false
-            RemoteResultFile = $remoteResultPattern
-            RemoteErrorFile  = ''
+            RemoteResultFile = $triggerInfo.RemoteResultFile
+            RemoteErrorFile  = $triggerInfo.RemoteErrorFile
             Error            = ($output -join ' ')
         }
     }
@@ -680,12 +697,101 @@ start=$(date +%s%N); nodeid=$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac);
     return [pscustomobject]@{
         Reachable        = $true
         Triggered        = $true
-        RemoteResultFile = $remoteResultPattern
-        RemoteErrorFile  = ''
+        RemoteResultFile = $triggerInfo.RemoteResultFile
+        RemoteErrorFile  = $triggerInfo.RemoteErrorFile
         Error            = ''
     }
 }
 
+function Invoke-NodeTriggerBatch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [pscustomobject[]]$Nodes,
+        [Parameter(Mandatory = $true)]
+        [string]$RunId
+    )
+
+    if ($Nodes.Count -eq 0) {
+        return @()
+    }
+
+    $indexedNodes = for ($i = 0; $i -lt $Nodes.Count; $i++) {
+        [pscustomobject]@{
+            Index = $i
+            Node  = $Nodes[$i]
+        }
+    }
+
+    $parallelism = [Math]::Max(1, [int]$Config.TriggerParallelism)
+    if ($parallelism -le 1 -or $indexedNodes.Count -le 1) {
+        return @(
+            foreach ($item in $indexedNodes) {
+                $triggerResult = Invoke-NodeTriggerCommand -Config $Config -Node $item.Node -RunId $RunId
+                [pscustomobject]@{
+                    Index         = $item.Index
+                    Node          = $item.Node
+                    TriggerResult = $triggerResult
+                }
+            }
+        )
+    }
+
+    $triggerInfo = Get-NodeTriggerCommandInfo -Config $Config
+    $throttle = [Math]::Min($parallelism, $indexedNodes.Count)
+
+    return @(
+        $indexedNodes |
+            ForEach-Object -Parallel {
+                $item = $_
+                $node = $item.Node
+                $config = $using:Config
+                $triggerInfo = $using:triggerInfo
+
+                $sshArgs = @(
+                    '-i', $config.SshKeyPath,
+                    '-o', 'BatchMode=yes',
+                    '-o', "ConnectTimeout=$($config.SshConnectTimeoutSeconds)",
+                    '-o', 'StrictHostKeyChecking=accept-new',
+                    "$($config.SshUser)@$($node.IP)"
+                )
+
+                $output = & $config.SshBinary @sshArgs $triggerInfo.TriggerCommand 2>&1
+                $exitCode = $LASTEXITCODE
+                if ($null -eq $output) {
+                    $output = @()
+                }
+
+                $triggerResult = if ($exitCode -eq 0) {
+                    [pscustomobject]@{
+                        Reachable        = $true
+                        Triggered        = $true
+                        RemoteResultFile = $triggerInfo.RemoteResultFile
+                        RemoteErrorFile  = $triggerInfo.RemoteErrorFile
+                        Error            = ''
+                    }
+                }
+                else {
+                    [pscustomobject]@{
+                        Reachable        = $false
+                        Triggered        = $false
+                        RemoteResultFile = $triggerInfo.RemoteResultFile
+                        RemoteErrorFile  = $triggerInfo.RemoteErrorFile
+                        Error            = ($output -join ' ')
+                    }
+                }
+
+                [pscustomobject]@{
+                    Index         = $item.Index
+                    Node          = $node
+                    TriggerResult = $triggerResult
+                }
+            } -ThrottleLimit $throttle |
+            Sort-Object -Property Index
+    )
+}
 function Collect-NodeResults {
     [CmdletBinding()]
     param(
@@ -1003,11 +1109,17 @@ try {
     $triggeredNodes = New-Object System.Collections.Generic.List[object]
     $reachableCount = 0
 
-    Log -Message "Trigger phase start, nodes=$($nodes.Count)"
+    Log -Message "Trigger phase start, nodes=$($nodes.Count), parallelism=$($config.TriggerParallelism)"
     foreach ($node in $nodes) {
+        Log-NodeAction -Node $node -Action 'trigger_start' -Detail 'attempting ssh trigger'
+    }
+
+    $triggerBatchResults = @(Invoke-NodeTriggerBatch -Config $config -Nodes $nodes -RunId $RunId)
+    foreach ($triggerEntry in $triggerBatchResults) {
+        $node = $triggerEntry.Node
+        $triggerResult = $triggerEntry.TriggerResult
+
         try {
-            Log-NodeAction -Node $node -Action 'trigger_start' -Detail 'attempting ssh trigger'
-            $triggerResult = Invoke-NodeTriggerCommand -Config $config -Node $node -RunId $RunId
             $triggeredAtUtc = (Get-Date).ToUniversalTime().ToString('o')
 
             if ($triggerResult.Triggered) {

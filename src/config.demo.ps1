@@ -16,6 +16,7 @@ return @{
 
     RemoteResultDir          = '/tmp/harvester'
     SshConnectTimeoutSeconds = 8
+    TriggerParallelism       = 10
     CollectWaitSeconds       = 90
     LogFilePrefix            = 'collect-node-metrics'
 
