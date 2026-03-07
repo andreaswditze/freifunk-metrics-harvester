@@ -738,6 +738,7 @@ function Save-Measurement {
         [Parameter(Mandatory = $true)]
         [string]$RunId,
         [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
         [string]$RawOutput,
         [AllowNull()]
         [pscustomobject]$ParsedMeasurement
@@ -967,6 +968,8 @@ catch {
     exit 1
 }
 }
+
+
 
 
 

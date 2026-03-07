@@ -18,12 +18,12 @@ Describe 'Parse-MeasurementOutput' {
         $parsed = Parse-MeasurementOutput -RawOutput 'invalid payload'
         $parsed | Should -BeNullOrEmpty
     }
-}
 
     It 'returns null for empty payload' {
         $parsed = Parse-MeasurementOutput -RawOutput ''
         $parsed | Should -BeNullOrEmpty
     }
+}
 
 Describe 'Resolve-NodeSourceFiles' {
     It 'finds Excel and CSV files recursively' {
@@ -71,6 +71,7 @@ Describe 'Get-TestNodesFromConfig' {
         $result.SourceFiles[0] | Should -Be '<test-node-ips>'
     }
 }
+
 Describe 'Convert-NodeTimestampToUtc' {
     It 'handles epoch seconds from nodes' {
         $utc = Convert-NodeTimestampToUtc -Timestamp '1772839860'
@@ -82,4 +83,3 @@ Describe 'Convert-NodeTimestampToUtc' {
         $utc | Should -Match '^2026-03-06T23:31:00\.123'
     }
 }
-
