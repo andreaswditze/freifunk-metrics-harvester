@@ -155,8 +155,8 @@ function Get-LatestThroughputByIp {
     )
 
     $throughputByIp = @{}
-    $dbPath = Convert-ToTrimmedString -Value $Config.DatabasePath
-    $sqliteBinary = Convert-ToTrimmedString -Value $Config.SQLiteBinary
+    $dbPath = if ($Config.ContainsKey('DatabasePath')) { Convert-ToTrimmedString -Value $Config.DatabasePath } else { '' }
+    $sqliteBinary = if ($Config.ContainsKey('SQLiteBinary')) { Convert-ToTrimmedString -Value $Config.SQLiteBinary } else { '' }
 
     if ([string]::IsNullOrWhiteSpace($dbPath) -or [string]::IsNullOrWhiteSpace($sqliteBinary) -or -not (Test-Path -Path $dbPath -PathType Leaf)) {
         return $throughputByIp
@@ -290,3 +290,4 @@ function Add-NodeJobRecord {
 
     Invoke-Sqlite -Config $Config -Sql $sql | Out-Null
 }
+
