@@ -599,8 +599,11 @@ function Invoke-NodeTriggerCommand {
     $remoteResultFile = "$($Config.RemoteResultDir)/${RunId}.result"
     $remoteErrorFile = "$($Config.RemoteResultDir)/${RunId}.error"
 
-    $payload = "start=`$(date +%s%N); nodeid=`$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac); t0=`$(date +%s.%N); wget -O /dev/null -q https://fsn1-speed.hetzner.com/100MB.bin; t1=`$(date +%s.%N); awk -v nodeid=`"`$nodeid`" -v start=`"`$start`" -v t0=`"`$t0`" -v t1=`"`$t1`" 'BEGIN{bytes=104857600; target=`"https://fsn1-speed.hetzner.com/100MB.bin`"; sec=t1-t0; printf `"speedtest,nodeid=%s download_mbit=%.2f,target=\\`"%s\\`" %s\\n`",nodeid,(bytes*8)/(sec*1000000),target,start}'"
-    $triggerCmd = "mkdir -p '$($Config.RemoteResultDir)'; ( $payload ) > '$remoteResultFile' 2> '$remoteErrorFile' &"
+    $payload = @'
+start=$(date +%s%N); nodeid=$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac); t0=$(date +%s.%N); wget -O /dev/null -q https://fsn1-speed.hetzner.com/100MB.bin; t1=$(date +%s.%N); awk -v nodeid="$nodeid" -v start="$start" -v t0="$t0" -v t1="$t1" 'BEGIN{bytes=104857600; target="https://fsn1-speed.hetzner.com/100MB.bin"; sec=t1-t0; printf "speedtest,nodeid=%s download_mbit=%.2f,target=\"%s\" %s\n",nodeid,(bytes*8)/(sec*1000000),target,start}'
+'@
+    $payloadEscaped = $payload.Replace("'", "'\''")
+    $triggerCmd = "mkdir -p '$($Config.RemoteResultDir)'; ( sh -lc '$payloadEscaped' ) > '$remoteResultFile' 2> '$remoteErrorFile' &"
 
     $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
     $output = & $Config.SshBinary @sshArgs $triggerCmd 2>&1
