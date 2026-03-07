@@ -682,6 +682,7 @@ function Collect-NodeResults {
             RawOutput       = ''
             ErrorOutput     = ($listOutput -join ' ')
             Files           = @()
+            PendingFiles    = @()
         }
     }
 
@@ -699,11 +700,13 @@ function Collect-NodeResults {
             RawOutput       = ''
             ErrorOutput     = ''
             Files           = @()
+            PendingFiles    = @()
         }
     }
 
     $safeIp = Get-SafeFileNamePart -Value $Node.IP
     $downloaded = @()
+    $pendingFiles = @()
     $downloadErrors = @()
 
     foreach ($remoteFile in $remoteFiles) {
@@ -727,6 +730,25 @@ function Collect-NodeResults {
             $rawOutput = Get-Content -Path $localPath -Raw
         }
 
+        $trimmedRawOutput = Convert-ToTrimmedString -Value $rawOutput
+        $hasMeasurementLine = $false
+        foreach ($line in ($trimmedRawOutput -split '\r?\n')) {
+            if ($line -match '^speedtest,nodeid=') {
+                $hasMeasurementLine = $true
+                break
+            }
+        }
+
+        if (-not $hasMeasurementLine) {
+            $pendingFiles += [pscustomobject]@{
+                RemotePath = $remoteFile
+                LocalPath  = $localPath
+                RawOutput  = $trimmedRawOutput
+                RawSize    = $trimmedRawOutput.Length
+            }
+            continue
+        }
+
         $null = & $Config.SshBinary @sshArgs "rm -f '$remoteFileEscaped'" 2>&1
         $deleteExit = $LASTEXITCODE
         if ($deleteExit -ne 0) {
@@ -737,18 +759,19 @@ function Collect-NodeResults {
         $downloaded += [pscustomobject]@{
             RemotePath = $remoteFile
             LocalPath  = $localPath
-            RawOutput  = Convert-ToTrimmedString -Value $rawOutput
+            RawOutput  = $trimmedRawOutput
         }
     }
 
     if ($downloaded.Count -eq 0) {
         return [pscustomobject]@{
-            Success         = $false
+            Success         = $true
             LocalResultPath = ''
             LocalErrorPath  = ''
             RawOutput       = ''
             ErrorOutput     = (@($downloadErrors) -join ' | ')
             Files           = @()
+            PendingFiles    = @($pendingFiles)
         }
     }
 
@@ -761,9 +784,9 @@ function Collect-NodeResults {
         RawOutput       = $firstFile.RawOutput
         ErrorOutput     = (@($downloadErrors) -join ' | ')
         Files           = @($downloaded)
+        PendingFiles    = @($pendingFiles)
     }
-}
-function Parse-MeasurementOutput {
+}function Parse-MeasurementOutput {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -1001,7 +1024,20 @@ try {
             }
 
             $collectedFiles = @($collect.Files)
+            $pendingFiles = @($collect.PendingFiles)
+
+            if ($pendingFiles.Count -gt 0) {
+                $pendingSummary = 'pending_files=' + $pendingFiles.Count + '; first_file=' + $pendingFiles[0].LocalPath + '; raw_size=' + $pendingFiles[0].RawSize
+                Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_pending' -CollectedAtUtc $collectedAtUtc -ResultFile ((@($pendingFiles | ForEach-Object { $_.LocalPath }) -join ';')) -ErrorMessage $pendingSummary
+                Log -Level WARN -Message "Node collect pending: $($node.IP) - $pendingSummary"
+                Log-NodeAction -Node $node -Action 'collect_pending' -Detail $pendingSummary -Level WARN
+            }
+
             if ($collectedFiles.Count -eq 0) {
+                if ($pendingFiles.Count -gt 0) {
+                    continue
+                }
+
                 $emptyMessage = 'no files found in remote harvester dir'
                 Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collected_empty' -CollectedAtUtc $collectedAtUtc -ErrorMessage $emptyMessage
                 Log -Level WARN -Message "Node collect empty: $($node.IP) - $emptyMessage"
