@@ -924,75 +924,72 @@ function Invoke-NodeTriggerBatch {
             Node  = $Nodes[$i]
         }
     }
-
     $parallelism = [Math]::Max(1, [int]$Config.TriggerParallelism)
     if ($parallelism -le 1 -or $indexedNodes.Count -le 1) {
-        return @(
-            foreach ($item in $indexedNodes) {
-                $triggerResult = Invoke-NodeTriggerCommand -Config $Config -Node $item.Node -RunId $RunId
-                [pscustomobject]@{
-                    Index         = $item.Index
-                    Node          = $item.Node
-                    TriggerResult = $triggerResult
-                }
+        foreach ($item in $indexedNodes) {
+            $triggerResult = Invoke-NodeTriggerCommand -Config $Config -Node $item.Node -RunId $RunId
+            [pscustomobject]@{
+                Index         = $item.Index
+                Node          = $item.Node
+                TriggerResult = $triggerResult
             }
-        )
+        }
+        return
     }
 
     $triggerInfo = Get-NodeTriggerCommandInfo -Config $Config
     $sshHostKeyArgs = Get-SshHostKeyArgs
     $throttle = [Math]::Min($parallelism, $indexedNodes.Count)
 
-    return @(
-        $indexedNodes |
-            ForEach-Object -Parallel {
-                $item = $_
-                $node = $item.Node
-                $config = $using:Config
-                $triggerInfo = $using:triggerInfo
+    $indexedNodes |
+        ForEach-Object -Parallel {
+            $item = $_
+            $node = $item.Node
+            $config = $using:Config
+            $triggerInfo = $using:triggerInfo
 
-                $sshHostKeyArgs = $using:sshHostKeyArgs
-                $sshArgs = @(
-                    '-i', $config.SshKeyPath,
-                    '-o', 'BatchMode=yes',
-                    '-o', "ConnectTimeout=$($config.SshConnectTimeoutSeconds)"
-                ) + $sshHostKeyArgs + @(
-                    "$($config.SshUser)@$($node.IP)"
-                )
+            $sshHostKeyArgs = $using:sshHostKeyArgs
+            $sshArgs = @(
+                '-i', $config.SshKeyPath,
+                '-o', 'BatchMode=yes',
+                '-o', "ConnectTimeout=$($config.SshConnectTimeoutSeconds)"
+            ) + $sshHostKeyArgs + @(
+                "$($config.SshUser)@$($node.IP)"
+            )
 
-                $output = & $config.SshBinary @sshArgs $triggerInfo.TriggerCommand 2>&1
-                $exitCode = $LASTEXITCODE
-                if ($null -eq $output) {
-                    $output = @()
-                }
+            $output = & $config.SshBinary @sshArgs $triggerInfo.TriggerCommand 2>&1
+            $exitCode = $LASTEXITCODE
+            if ($null -eq $output) {
+                $output = @()
+            }
 
-                $triggerResult = if ($exitCode -eq 0) {
-                    [pscustomobject]@{
-                        Reachable        = $true
-                        Triggered        = $true
-                        RemoteResultFile = $triggerInfo.RemoteResultFile
-                        RemoteErrorFile  = $triggerInfo.RemoteErrorFile
-                        Error            = ''
-                    }
-                }
-                else {
-                    [pscustomobject]@{
-                        Reachable        = $false
-                        Triggered        = $false
-                        RemoteResultFile = $triggerInfo.RemoteResultFile
-                        RemoteErrorFile  = $triggerInfo.RemoteErrorFile
-                        Error            = ($output -join ' ')
-                    }
-                }
-
+            $triggerResult = if ($exitCode -eq 0) {
                 [pscustomobject]@{
-                    Index         = $item.Index
-                    Node          = $node
-                    TriggerResult = $triggerResult
+                    Reachable        = $true
+                    Triggered        = $true
+                    RemoteResultFile = $triggerInfo.RemoteResultFile
+                    RemoteErrorFile  = $triggerInfo.RemoteErrorFile
+                    Error            = ''
                 }
-            } -ThrottleLimit $throttle |
-            Sort-Object -Property Index
-    )
+            }
+            else {
+                [pscustomobject]@{
+                    Reachable        = $false
+                    Triggered        = $false
+                    RemoteResultFile = $triggerInfo.RemoteResultFile
+                    RemoteErrorFile  = $triggerInfo.RemoteErrorFile
+                    Error            = ($output -join ' ')
+                }
+            }
+
+            [pscustomobject]@{
+                Index         = $item.Index
+                Node          = $node
+                TriggerResult = $triggerResult
+            }
+        } -ThrottleLimit $throttle
+
+    return
 }
 function Get-CollectStreamMarkers {
     [CmdletBinding()]
@@ -1455,10 +1452,11 @@ try {
 
     Update-ConsoleStatus -Complete
     Log -Message "Trigger phase start, nodes=$($nodes.Count), parallelism=$($config.TriggerParallelism)"
-    $triggerBatchResults = @(Invoke-NodeTriggerBatch -Config $config -Nodes $nodes -RunId $RunId)
-    $triggerTotal = [Math]::Max(1, $triggerBatchResults.Count)
+    $triggerTotal = [Math]::Max(1, $nodes.Count)
     $triggerIndex = 0
-    foreach ($triggerEntry in $triggerBatchResults) {
+    Update-ConsoleStatus -Message ("Trigger 0/{0}: waiting for completed jobs" -f $triggerTotal)
+    Write-Progress -Id 1 -Activity 'Triggering nodes' -Status ("0/{0}" -f $triggerTotal) -PercentComplete 0
+    foreach ($triggerEntry in Invoke-NodeTriggerBatch -Config $config -Nodes $nodes -RunId $RunId) {
         $triggerIndex++
         $node = $triggerEntry.Node
         $triggerResult = $triggerEntry.TriggerResult
@@ -1498,6 +1496,8 @@ try {
     $parsedCount = 0
     $collectTotal = [Math]::Max(1, $triggeredNodes.Count)
     $collectIndex = 0
+    Update-ConsoleStatus -Message ("Collect 0/{0}: waiting for completed jobs" -f $collectTotal)
+    Write-Progress -Id 2 -Activity 'Collecting node results' -Status ("0/{0}" -f $collectTotal) -PercentComplete 0
 
     Log -Message "Collect phase start, nodes=$($triggeredNodes.Count), parallelism=$($config.CollectParallelism)"
     foreach ($collectEntry in Invoke-NodeCollectBatch -Config $config -Nodes @($triggeredNodes) -RunId $RunId -RawDir $runInfo.RawDir) {
