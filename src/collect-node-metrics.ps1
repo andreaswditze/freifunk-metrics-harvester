@@ -559,7 +559,7 @@ function Import-NodeListFromExcel {
         $previousWarningPreference = $WarningPreference
         try {
             $WarningPreference = 'SilentlyContinue'
-            Import-Module ImportExcel -ErrorAction Stop | Out-Null
+            Import-Module ImportExcel -ErrorAction Stop 3>$null | Out-Null
         }
         finally {
             $WarningPreference = $previousWarningPreference
@@ -590,7 +590,7 @@ function Import-NodeListFromExcel {
             }
 
             try {
-                $rows = Import-Excel -Path $filePath -WarningAction SilentlyContinue
+                $rows = Import-Excel -Path $filePath -WarningAction SilentlyContinue 3>$null
             }
             catch {
                 $message = $_.Exception.Message
