@@ -241,3 +241,120 @@ Describe 'Assert-ValidConfig' {
         { Assert-ValidConfig -Config $config } | Should -Throw 'Config value CollectParallelism must be at least 1.'
     }
 }
+
+Describe 'Convert-CollectStreamToFiles' {
+    It 'parses multiple streamed remote files' {
+        $stream = @(
+            '__FFMH_FILE_BEGIN__/tmp/harvester/1.txt'
+            'speedtest,nodeid=aabbcc download_mbit=12.34,target="https://example.invalid/test.bin" 123'
+            '__FFMH_FILE_END__/tmp/harvester/1.txt'
+            '__FFMH_FILE_BEGIN__/tmp/harvester/2.txt'
+            'pending output'
+            '__FFMH_FILE_END__/tmp/harvester/2.txt'
+        ) -join "`n"
+
+        $files = @(Convert-CollectStreamToFiles -RawOutput $stream)
+
+        $files.Count | Should -Be 2
+        $files[0].RemotePath | Should -Be '/tmp/harvester/1.txt'
+        $files[0].RawOutput | Should -Match '^speedtest,nodeid=aabbcc'
+        $files[1].RemotePath | Should -Be '/tmp/harvester/2.txt'
+        $files[1].RawOutput | Should -Be 'pending output'
+    }
+}
+
+Describe 'Collect-NodeResults' {
+    It 'keeps downloaded measurements when remote delete fails' {
+        $mockSsh = Join-Path $TestDrive 'mock-ssh-delete-fail.ps1'
+        @(
+            '$command = $args[-1]'
+            'if ($command -like ''find*'') {'
+            '    @(' 
+            '        ''__FFMH_FILE_BEGIN__/tmp/harvester/1700000000.txt'''
+            '        ''speedtest,nodeid=aabbccddeeff download_mbit=48.25,target="https://example.invalid/test.bin" 1700000000000000000'''
+            '        ''__FFMH_FILE_END__/tmp/harvester/1700000000.txt'''
+            '    ) | ForEach-Object { Write-Output $_ }'
+            '    exit 0'
+            '}'
+            'if ($command -like ''rm -f*'') {'
+            '    Write-Output ''simulated delete failure'''
+            '    exit 7'
+            '}'
+            'Write-Output ("unexpected command: {0}" -f $command)'
+            'exit 9'
+        ) | Set-Content -Path $mockSsh
+
+        $rawDir = Join-Path $TestDrive 'raw-delete-fail'
+        New-Item -ItemType Directory -Path $rawDir -Force | Out-Null
+
+        $config = @{
+            SshBinary = $mockSsh
+            SshKeyPath = 'ignore'
+            SshUser = 'root'
+            SshConnectTimeoutSeconds = 1
+            RemoteResultDir = '/tmp/harvester'
+            CollectParallelism = 2
+        }
+        $node = [pscustomobject]@{ DeviceID = 'node-001'; Name = 'Node 1'; IP = '2a03:2260::1'; Domain = 'dom-a' }
+
+        $result = Collect-NodeResults -Config $config -Node $node -RunId 'run-test' -RawDir $rawDir
+        $files = @($result.Files)
+
+        $result.Success | Should -BeTrue
+        $files.Count | Should -Be 1
+        $result.ErrorOutput | Should -Match 'delete failed'
+        (Test-Path -Path $files[0].LocalPath -PathType Leaf) | Should -BeTrue
+        $files[0].RawOutput | Should -Match '^speedtest,nodeid=aabbccddeeff'
+    }
+}
+
+Describe 'Invoke-NodeCollectBatch' {
+    It 'collects multiple nodes in parallel' {
+        $mockSsh = Join-Path $TestDrive 'mock-ssh-batch.ps1'
+        @(
+            '$command = $args[-1]'
+            '$nodeHost = $args[-2]'
+            'if ($command -like ''find*'') {'
+            '    $suffix = if ($nodeHost -like ''*::1'') { ''1'' } else { ''2'' }'
+            '    @('
+            '        "__FFMH_FILE_BEGIN__/tmp/harvester/170000000$suffix.txt"'
+            '        "speedtest,nodeid=node$suffix download_mbit=40.$suffix,target=`"https://example.invalid/test.bin`" 170000000000000000$suffix"'
+            '        "__FFMH_FILE_END__/tmp/harvester/170000000$suffix.txt"'
+            '    ) | ForEach-Object { Write-Output $_ }'
+            '    exit 0'
+            '}'
+            'if ($command -like ''rm -f*'') {'
+            '    exit 0'
+            '}'
+            'Write-Output ("unexpected command: {0}" -f $command)'
+            'exit 9'
+        ) | Set-Content -Path $mockSsh
+
+        $rawDir = Join-Path $TestDrive 'raw-batch'
+        New-Item -ItemType Directory -Path $rawDir -Force | Out-Null
+
+        $config = @{
+            SshBinary = $mockSsh
+            SshKeyPath = 'ignore'
+            SshUser = 'root'
+            SshConnectTimeoutSeconds = 1
+            RemoteResultDir = '/tmp/harvester'
+            CollectParallelism = 2
+        }
+        $nodes = @(
+            [pscustomobject]@{ DeviceID = 'node-001'; Name = 'Node 1'; IP = '2a03:2260::1'; Domain = 'dom-a' }
+            [pscustomobject]@{ DeviceID = 'node-002'; Name = 'Node 2'; IP = '2a03:2260::2'; Domain = 'dom-b' }
+        )
+
+        $results = @(Invoke-NodeCollectBatch -Config $config -Nodes $nodes -RunId 'run-batch' -RawDir $rawDir)
+        $sorted = @($results | Sort-Object { $_.Node.DeviceID })
+
+        $sorted.Count | Should -Be 2
+        $sorted[0].Node.DeviceID | Should -Be 'node-001'
+        $sorted[0].CollectResult.Success | Should -BeTrue
+        @($sorted[0].CollectResult.Files).Count | Should -Be 1
+        $sorted[1].Node.DeviceID | Should -Be 'node-002'
+        $sorted[1].CollectResult.Success | Should -BeTrue
+        @($sorted[1].CollectResult.Files).Count | Should -Be 1
+    }
+}
