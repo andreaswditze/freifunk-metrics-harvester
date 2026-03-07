@@ -556,7 +556,7 @@ function Import-NodeListFromExcel {
     $importExcelAvailable = $false
     if (Get-Module -ListAvailable -Name ImportExcel) {
         $importExcelAvailable = $true
-        Import-Module ImportExcel -ErrorAction Stop | Out-Null
+        Import-Module ImportExcel -ErrorAction Stop -WarningAction SilentlyContinue | Out-Null
     }
 
     foreach ($filePath in $sourceFiles) {
@@ -583,7 +583,7 @@ function Import-NodeListFromExcel {
             }
 
             try {
-                $rows = Import-Excel -Path $filePath
+                $rows = Import-Excel -Path $filePath -WarningAction SilentlyContinue
             }
             catch {
                 $message = $_.Exception.Message
