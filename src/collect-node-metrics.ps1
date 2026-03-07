@@ -727,6 +727,13 @@ function Collect-NodeResults {
             $rawOutput = Get-Content -Path $localPath -Raw
         }
 
+        $null = & $Config.SshBinary @sshArgs "rm -f '$remoteFileEscaped'" 2>&1
+        $deleteExit = $LASTEXITCODE
+        if ($deleteExit -ne 0) {
+            $downloadErrors += ("delete failed for {0}" -f $remoteFile)
+            continue
+        }
+
         $downloaded += [pscustomobject]@{
             RemotePath = $remoteFile
             LocalPath  = $localPath
