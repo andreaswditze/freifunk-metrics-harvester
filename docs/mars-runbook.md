@@ -107,7 +107,7 @@ pwsh ./src/collect-node-metrics.ps1 -ConfigPath ./src/config.production.ps1
 Operational flow:
 - Trigger phase runs in parallel up to `TriggerParallelism`.
 - Each node delays its download randomly between `0` and `TriggerRandomDelayMaxSeconds` seconds.
-- After trigger completion, the collector waits `TriggerRandomDelayMaxSeconds` once.
+- After trigger completion, the collector waits `2 * TriggerRandomDelayMaxSeconds`.
 - Collect phase reconnects only to successfully triggered nodes and runs in parallel up to `CollectParallelism`.
 - Result files are fetched per node in one SSH stream. Parsed measurement files are removed remotely. Pending files remain on the node.
 
@@ -153,4 +153,5 @@ pwsh ./tests/Invoke-Tests.ps1 -OutputFormat NUnitXml -OutputPath ./temp/test-res
 - Empty run:
   check `UseTestNodeIPs` versus Excel settings and inspect the startup config summary log.
 - Repeated `collect_pending` entries:
-  increase `TriggerRandomDelayMaxSeconds` only if you also accept the longer wait before collect, or reduce it if nodes finish too late for the current workflow.
+  increase `TriggerRandomDelayMaxSeconds` only if you also accept the doubled wait before collect, or reduce it if nodes finish too late for the current workflow.
+

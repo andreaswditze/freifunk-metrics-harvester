@@ -1489,7 +1489,7 @@ try {
     }
     Write-Progress -Id 1 -Activity 'Triggering nodes' -Completed
 
-    $waitSeconds = [Math]::Max(0, [int]$config.TriggerRandomDelayMaxSeconds)
+    $waitSeconds = [Math]::Max(0, [int]$config.TriggerRandomDelayMaxSeconds) * 2
     if ($waitSeconds -gt 0) {
         Log -Message "Waiting $waitSeconds seconds before collect phase"
         Wait-WithProgress -Seconds $waitSeconds -Activity 'Waiting for randomized download starts'
@@ -1586,5 +1586,6 @@ catch {
     exit 1
 }
 }
+
 
 

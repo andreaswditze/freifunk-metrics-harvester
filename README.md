@@ -68,7 +68,7 @@ The collector validates these values at startup and aborts early on invalid conf
 ## Runtime behavior
 - Triggering runs with up to `TriggerParallelism` concurrent SSH sessions.
 - Each node waits a random delay between `0` and `TriggerRandomDelayMaxSeconds` before starting the download.
-- After all trigger attempts finish, the collector waits `TriggerRandomDelayMaxSeconds` once globally.
+- After all trigger attempts finish, the collector waits `2 * TriggerRandomDelayMaxSeconds` globally.
 - Collecting runs only against nodes that were successfully triggered.
 - Collecting uses up to `CollectParallelism` concurrent SSH sessions.
 - Per node, all `*.txt` files in `RemoteResultDir` are fetched in one SSH stream instead of one `cat` call per file.
@@ -111,3 +111,4 @@ pwsh ./tests/Invoke-Tests.ps1
 
 ## License
 MIT License
+
