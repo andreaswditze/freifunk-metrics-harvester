@@ -200,7 +200,7 @@ function Get-NodeTriggerAssignments {
         )
     }
 
-    $positiveNodes = @(
+    $orderedNodes = @(
         $indexedNodes |
             ForEach-Object {
                 $ip = Convert-ToTrimmedString -Value $_.Node.IP
@@ -215,22 +215,20 @@ function Get-NodeTriggerAssignments {
                     LatestThroughput = $latestThroughput
                 }
             } |
-            Where-Object { $_.LatestThroughput -gt 0 }
+            Sort-Object @{ Expression = { $_.LatestThroughput } }, @{ Expression = { Get-NodeTriggerAssignmentOrderKey -RunId $RunId -Node $_.Node } }, @{ Expression = { $_.Index } }
     )
 
-    if ($positiveNodes.Count -gt 0) {
-        $orderedPositiveNodes = @($positiveNodes | Sort-Object @{ Expression = { $_.LatestThroughput } }, @{ Expression = { Get-NodeTriggerAssignmentOrderKey -RunId $RunId -Node $_.Node } }, @{ Expression = { $_.Index } })
-
-        for ($rank = 0; $rank -lt $orderedPositiveNodes.Count; $rank++) {
-            $assignedDelay = if ($orderedPositiveNodes.Count -eq 1) {
-                $delayMaxSeconds
+    if ($orderedNodes.Count -gt 0) {
+        for ($rank = 0; $rank -lt $orderedNodes.Count; $rank++) {
+            $assignedDelay = if ($orderedNodes.Count -eq 1) {
+                0
             }
             else {
-                $rawDelay = [int][Math]::Round((((($rank + 1) * $delayMaxSeconds) / [double]$orderedPositiveNodes.Count)), [System.MidpointRounding]::AwayFromZero)
-                [Math]::Max(1, [Math]::Min($delayMaxSeconds, $rawDelay))
+                $rawDelay = [int][Math]::Round((($rank * $delayMaxSeconds) / [double]($orderedNodes.Count - 1)), [System.MidpointRounding]::AwayFromZero)
+                [Math]::Max(0, [Math]::Min($delayMaxSeconds, $rawDelay))
             }
 
-            $delayByIndex[$orderedPositiveNodes[$rank].Index] = $assignedDelay
+            $delayByIndex[$orderedNodes[$rank].Index] = $assignedDelay
         }
     }
 

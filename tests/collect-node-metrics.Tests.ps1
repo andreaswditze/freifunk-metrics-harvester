@@ -194,7 +194,7 @@ Describe 'Import-NodeListFromExcel' {
     }
 }
 Describe 'Get-NodeTriggerAssignments' {
-    It 'sets missing or zero throughputs to 0 and delays faster nodes longer' {
+    It 'spreads unknown and slow nodes across the beginning of the delay window' {
         InModuleScope FreifunkMetrics {
             $config = @{ TriggerRandomDelayMaxSeconds = 10 }
             $nodes = @(
@@ -219,9 +219,27 @@ Describe 'Get-NodeTriggerAssignments' {
             }
 
             $delayByDeviceId['node-001'] | Should -Be 0
-            $delayByDeviceId['node-002'] | Should -Be 0
-            $delayByDeviceId['node-003'] | Should -Be 5
+            $delayByDeviceId['node-002'] | Should -Be 3
+            $delayByDeviceId['node-003'] | Should -Be 7
             $delayByDeviceId['node-004'] | Should -Be 10
+        }
+    }
+
+    It 'does not assign all-unknown nodes to delay 0' {
+        InModuleScope FreifunkMetrics {
+            $config = @{ TriggerRandomDelayMaxSeconds = 10 }
+            $nodes = @(
+                [pscustomobject]@{ DeviceID = 'node-001'; Name = 'Node 1'; IP = '2a03:2260::1'; Domain = 'dom-a' }
+                [pscustomobject]@{ DeviceID = 'node-002'; Name = 'Node 2'; IP = '2a03:2260::2'; Domain = 'dom-a' }
+                [pscustomobject]@{ DeviceID = 'node-003'; Name = 'Node 3'; IP = '2a03:2260::3'; Domain = 'dom-a' }
+                [pscustomobject]@{ DeviceID = 'node-004'; Name = 'Node 4'; IP = '2a03:2260::4'; Domain = 'dom-a' }
+            )
+
+            Mock Get-LatestThroughputByIp { @{} }
+
+            $assignedDelays = @(Get-NodeTriggerAssignments -Config $config -RunId 'run-a' -Nodes $nodes | ForEach-Object { $_.AssignedDelaySeconds } | Sort-Object)
+
+            $assignedDelays | Should -Be @(0, 3, 7, 10)
         }
     }
 }
