@@ -11,16 +11,15 @@ return @{
     SshKeyPath               = '/home/ffuser/.ssh/burgwald_freifunk_id_rsa_nopw'
     SshUser                  = 'root'
     SshBinary                = 'ssh'
-    ScpBinary                = 'scp'
     SQLiteBinary             = 'sqlite3'
 
     RemoteResultDir          = '/tmp/harvester'
     SshConnectTimeoutSeconds = 8
     TriggerParallelism       = 10
+    CollectParallelism       = 10
     TriggerRandomDelayMaxSeconds = 600
     SpeedtestTargetUrl         = 'https://fsn1-speed.hetzner.com/100MB.bin'
     SpeedtestTargetBytes       = 104857600
-    CollectWaitSeconds       = 90
     LogFilePrefix            = 'collect-node-metrics'
 
     # Optional explicit files.

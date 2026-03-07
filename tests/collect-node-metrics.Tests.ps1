@@ -159,3 +159,85 @@ Describe 'Get-NodeTriggerCommandInfo' {
     }
 }
 
+
+Describe 'Assert-ValidConfig' {
+    It 'normalizes valid config values' {
+        $config = @{
+            SshUser = ' root '
+            SshBinary = ' ssh '
+            SQLiteBinary = ' sqlite3 '
+            RemoteResultDir = ' /tmp/harvester '
+            LogFilePrefix = ' collect-node-metrics '
+            SpeedtestTargetUrl = ' https://example.invalid/testfile.bin '
+            SshConnectTimeoutSeconds = '8'
+            TriggerParallelism = '10'
+            CollectParallelism = '4'
+            TriggerRandomDelayMaxSeconds = '600'
+            SpeedtestTargetBytes = '104857600'
+            ExcelInputFiles = @('nodes.csv', '', $null)
+            ExcelInputDirectories = @('/tmp/nodes', ' ')
+            ExcelSearchRecurse = $true
+            UseTestNodeIPs = $false
+            TestNodeIPs = @('2a03:2260::1', '')
+        }
+
+        Assert-ValidConfig -Config $config
+
+        $config.RemoteResultDir | Should -Be '/tmp/harvester'
+        $config.LogFilePrefix | Should -Be 'collect-node-metrics'
+        $config.SpeedtestTargetUrl | Should -Be 'https://example.invalid/testfile.bin'
+        $config.TriggerParallelism | Should -Be 10
+        $config.CollectParallelism | Should -Be 4
+        $config.TriggerRandomDelayMaxSeconds | Should -Be 600
+        $config.SpeedtestTargetBytes | Should -Be 104857600
+        $config.ExcelInputFiles | Should -Be @('nodes.csv')
+        $config.ExcelInputDirectories | Should -Be @('/tmp/nodes')
+        $config.TestNodeIPs | Should -Be @('2a03:2260::1')
+    }
+
+    It 'rejects invalid speedtest url schemes' {
+        $config = @{
+            SshUser = 'root'
+            SshBinary = 'ssh'
+            SQLiteBinary = 'sqlite3'
+            RemoteResultDir = '/tmp/harvester'
+            LogFilePrefix = 'collect-node-metrics'
+            SpeedtestTargetUrl = 'ftp://example.invalid/testfile.bin'
+            SshConnectTimeoutSeconds = 8
+            TriggerParallelism = 10
+            CollectParallelism = 4
+            TriggerRandomDelayMaxSeconds = 600
+            SpeedtestTargetBytes = 104857600
+            ExcelInputFiles = @()
+            ExcelInputDirectories = @()
+            ExcelSearchRecurse = $true
+            UseTestNodeIPs = $false
+            TestNodeIPs = @()
+        }
+
+        { Assert-ValidConfig -Config $config } | Should -Throw 'Config value SpeedtestTargetUrl must use http or https.'
+    }
+
+    It 'rejects non-positive collect parallelism' {
+        $config = @{
+            SshUser = 'root'
+            SshBinary = 'ssh'
+            SQLiteBinary = 'sqlite3'
+            RemoteResultDir = '/tmp/harvester'
+            LogFilePrefix = 'collect-node-metrics'
+            SpeedtestTargetUrl = 'https://example.invalid/testfile.bin'
+            SshConnectTimeoutSeconds = 8
+            TriggerParallelism = 10
+            CollectParallelism = 0
+            TriggerRandomDelayMaxSeconds = 600
+            SpeedtestTargetBytes = 104857600
+            ExcelInputFiles = @()
+            ExcelInputDirectories = @()
+            ExcelSearchRecurse = $true
+            UseTestNodeIPs = $false
+            TestNodeIPs = @()
+        }
+
+        { Assert-ValidConfig -Config $config } | Should -Throw 'Config value CollectParallelism must be at least 1.'
+    }
+}
