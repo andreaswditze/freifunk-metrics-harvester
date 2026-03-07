@@ -112,7 +112,7 @@ function Wait-WithProgress {
         [int]$Seconds,
         [string]$Activity = 'Waiting before collect phase',
         [hashtable]$Config = @{},
-        [pscustomobject[]]$Nodes = @(),
+        [object[]]$Nodes = @(),
         [int]$PollIntervalSeconds = 15
     )
 
@@ -855,7 +855,7 @@ function Test-NodeResultReady {
         [Parameter(Mandatory = $true)]
         [hashtable]$Config,
         [Parameter(Mandatory = $true)]
-        [pscustomobject]$Node
+        [object]$Node
     )
 
     $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
@@ -877,7 +877,7 @@ function Get-ReadyNodeResultCountBatch {
         [Parameter(Mandatory = $true)]
         [hashtable]$Config,
         [Parameter(Mandatory = $true)]
-        [pscustomobject[]]$Nodes
+        [object[]]$Nodes
     )
 
     if (@($Nodes).Count -eq 0) {
@@ -1589,7 +1589,7 @@ try {
     $waitSeconds = [Math]::Max(0, [int]$config.TriggerRandomDelayMaxSeconds) * 2
     if ($waitSeconds -gt 0) {
         Log -Message "Waiting $waitSeconds seconds before collect phase"
-        Wait-WithProgress -Seconds $waitSeconds -Activity 'Waiting for randomized download starts' -Config $config -Nodes @($triggeredNodes)
+        Wait-WithProgress -Seconds $waitSeconds -Activity 'Waiting for randomized download starts' -Config $config -Nodes @($triggeredNodes.ToArray())
     }
 
     $collectedCount = 0
@@ -1601,7 +1601,7 @@ try {
     Write-Progress -Id 2 -Activity 'Collecting node results' -Status ("0/{0}" -f $collectTotal) -PercentComplete 0
 
     Log -Message "Collect phase start, nodes=$($triggeredNodes.Count), parallelism=$($config.CollectParallelism)"
-    foreach ($collectEntry in Invoke-NodeCollectBatch -Config $config -Nodes @($triggeredNodes) -RunId $RunId -RawDir $runInfo.RawDir) {
+    foreach ($collectEntry in Invoke-NodeCollectBatch -Config $config -Nodes @($triggeredNodes.ToArray()) -RunId $RunId -RawDir $runInfo.RawDir) {
         $collectIndex++
         $node = $collectEntry.Node
         $collect = $collectEntry.CollectResult
