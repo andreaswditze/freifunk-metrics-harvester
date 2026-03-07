@@ -25,6 +25,30 @@ $script:CurrentConfig = $null
 $script:LogFilePath = $null
 $script:DailyLogDir = $null
 $script:DailyLogFilePath = $null
+$script:ConsoleStatusLength = 0
+
+function Update-ConsoleStatus {
+    [CmdletBinding()]
+    param(
+        [string]$Message = '',
+        [switch]$Complete
+    )
+
+    $text = Convert-ToTrimmedString -Value $Message
+    $width = [Math]::Max($script:ConsoleStatusLength, $text.Length)
+
+    if ($Complete) {
+        if ($script:ConsoleStatusLength -gt 0) {
+            Write-Host ("`r" + (' ' * $script:ConsoleStatusLength) + "`r") -NoNewline
+            $script:ConsoleStatusLength = 0
+        }
+        return
+    }
+
+    $padded = $text.PadRight($width)
+    Write-Host ("`r$padded") -NoNewline
+    $script:ConsoleStatusLength = $width
+}
 
 function Log {
     [CmdletBinding()]
@@ -37,7 +61,6 @@ function Log {
 
     $timestamp = Get-Date -Format 'dd.MM.yyyy HH:mm:ss'
     $line = '{0}: [{1}] {2}' -f $timestamp, $Level, $Message
-    Write-Host $line
 
     if ($script:LogFilePath) {
         Add-Content -Path $script:LogFilePath -Value $line
@@ -47,7 +70,6 @@ function Log {
         Add-Content -Path $script:DailyLogFilePath -Value $line
     }
 }
-
 
 function Log-NodeAction {
     [CmdletBinding()]
@@ -78,6 +100,7 @@ function Wait-WithProgress {
         return
     }
 
+    Update-ConsoleStatus -Complete
     for ($elapsed = 0; $elapsed -lt $Seconds; $elapsed++) {
         $remaining = $Seconds - $elapsed
         $percent = [int](($elapsed / [double]$Seconds) * 100)
@@ -87,6 +110,7 @@ function Wait-WithProgress {
 
     Write-Progress -Activity $Activity -Completed
 }
+
 function Convert-ToTrimmedString {
     [CmdletBinding()]
     param(
@@ -1135,51 +1159,55 @@ try {
     $reachableCount = 0
 
     Log -Message "Trigger phase start, nodes=$($nodes.Count), parallelism=$($config.TriggerParallelism)"
-    foreach ($node in $nodes) {
-        Log-NodeAction -Node $node -Action 'trigger_start' -Detail 'attempting ssh trigger'
-    }
-
     $triggerBatchResults = @(Invoke-NodeTriggerBatch -Config $config -Nodes $nodes -RunId $RunId)
+    $triggerTotal = [Math]::Max(1, $triggerBatchResults.Count)
+    $triggerIndex = 0
     foreach ($triggerEntry in $triggerBatchResults) {
+        $triggerIndex++
         $node = $triggerEntry.Node
         $triggerResult = $triggerEntry.TriggerResult
+        Update-ConsoleStatus -Message ("Trigger {0}/{1}: {2}" -f $triggerIndex, $triggerTotal, $node.IP)
+        Write-Progress -Id 1 -Activity 'Triggering nodes' -Status ("{0}/{1}" -f $triggerIndex, $triggerTotal) -PercentComplete ([int](($triggerIndex / [double]$triggerTotal) * 100))
 
         try {
+            Log-NodeAction -Node $node -Action 'trigger_start' -Detail 'attempting ssh trigger'
             $triggeredAtUtc = (Get-Date).ToUniversalTime().ToString('o')
 
             if ($triggerResult.Triggered) {
                 $reachableCount++
                 $triggeredNodes.Add($node)
                 Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'triggered' -TriggeredAtUtc $triggeredAtUtc -ResultFile $triggerResult.RemoteResultFile -ErrorFile $triggerResult.RemoteErrorFile
-                Log -Message "Node trigger success: $($node.IP)"
                 Log-NodeAction -Node $node -Action 'trigger_success' -Detail 'remote background job started'
             }
             else {
                 Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'trigger_failed' -TriggeredAtUtc $triggeredAtUtc -ErrorMessage $triggerResult.Error
-                Log -Level WARN -Message "Node trigger failed: $($node.IP) - $($triggerResult.Error)"
                 Log-NodeAction -Node $node -Action 'trigger_failed' -Detail $triggerResult.Error -Level WARN
             }
         }
         catch {
             Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'trigger_exception' -TriggeredAtUtc ((Get-Date).ToUniversalTime().ToString('o')) -ErrorMessage $_.Exception.Message
-            Log -Level ERROR -Message "Node trigger exception for $($node.IP): $($_.Exception.Message)"
             Log-NodeAction -Node $node -Action 'trigger_exception' -Detail $_.Exception.Message -Level ERROR
         }
     }
+    Write-Progress -Id 1 -Activity 'Triggering nodes' -Completed
 
-    Log -Message "Trigger phase done, reachable=$reachableCount"
-
-    if ($config.CollectWaitSeconds -gt 0) {
-        Log -Message "Waiting $($config.CollectWaitSeconds)s before collect phase"
-        Wait-WithProgress -Seconds $config.CollectWaitSeconds -Activity 'Waiting before collect phase'
+    $waitSeconds = [Math]::Max(0, [int]$config.TriggerRandomDelayMaxSeconds)
+    if ($waitSeconds -gt 0) {
+        Log -Message "Waiting $waitSeconds seconds before collect phase"
+        Wait-WithProgress -Seconds $waitSeconds -Activity 'Waiting for randomized download starts'
     }
 
     $collectedCount = 0
     $collectedFileCount = 0
     $parsedCount = 0
+    $collectTotal = [Math]::Max(1, $triggeredNodes.Count)
+    $collectIndex = 0
 
     Log -Message "Collect phase start, nodes=$($triggeredNodes.Count)"
     foreach ($node in $triggeredNodes) {
+        $collectIndex++
+        Update-ConsoleStatus -Message ("Collect {0}/{1}: {2}" -f $collectIndex, $collectTotal, $node.IP)
+        Write-Progress -Id 2 -Activity 'Collecting node results' -Status ("{0}/{1}" -f $collectIndex, $collectTotal) -PercentComplete ([int](($collectIndex / [double]$collectTotal) * 100))
         try {
             Log-NodeAction -Node $node -Action 'collect_start' -Detail 'attempting result collection'
             $collect = Collect-NodeResults -Config $config -Node $node -RunId $RunId -RawDir $runInfo.RawDir
@@ -1187,7 +1215,6 @@ try {
 
             if (-not $collect.Success) {
                 Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_failed' -CollectedAtUtc $collectedAtUtc -ErrorMessage $collect.ErrorOutput
-                Log -Level WARN -Message "Node collect failed: $($node.IP) - $($collect.ErrorOutput)"
                 Log-NodeAction -Node $node -Action 'collect_failed' -Detail $collect.ErrorOutput -Level WARN
                 continue
             }
@@ -1197,8 +1224,7 @@ try {
 
             if ($pendingFiles.Count -gt 0) {
                 $pendingSummary = 'pending_files=' + $pendingFiles.Count + '; first_file=' + $pendingFiles[0].LocalPath + '; raw_size=' + $pendingFiles[0].RawSize
-                Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_pending' -CollectedAtUtc $collectedAtUtc -ResultFile ((@($pendingFiles | ForEach-Object { $_.LocalPath }) -join ';')) -ErrorMessage $pendingSummary
-                Log -Level WARN -Message "Node collect pending: $($node.IP) - $pendingSummary"
+                Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_pending' -CollectedAtUtc $collectedAtUtc -ResultFile ((@($pendingFiles | ForEach-Object { $_.LocalPath }) -join ';') ) -ErrorMessage $pendingSummary
                 Log-NodeAction -Node $node -Action 'collect_pending' -Detail $pendingSummary -Level WARN
             }
 
@@ -1209,7 +1235,6 @@ try {
 
                 $emptyMessage = 'no files found in remote harvester dir'
                 Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collected_empty' -CollectedAtUtc $collectedAtUtc -ErrorMessage $emptyMessage
-                Log -Level WARN -Message "Node collect empty: $($node.IP) - $emptyMessage"
                 Log-NodeAction -Node $node -Action 'collect_empty' -Detail $emptyMessage -Level WARN
                 continue
             }
@@ -1225,11 +1250,9 @@ try {
                 $parsed = Parse-MeasurementOutput -RawOutput $file.RawOutput
                 if ($parsed) {
                     $parsedCount++
-                    Log -Message "Parse success: ip=$($node.IP), nodeid=$($parsed.NodeId), throughput_mbit=$($parsed.ThroughputMbit), source_file=$($file.LocalPath)"
                     Log-NodeAction -Node $node -Action 'parse_success' -Detail ('nodeid=' + $parsed.NodeId + '; throughput_mbit=' + $parsed.ThroughputMbit + '; source_file=' + $file.LocalPath)
                 }
                 else {
-                    Log -Level WARN -Message "Parse failed for node $($node.IP), source_file=$($file.LocalPath), raw stored"
                     Log-NodeAction -Node $node -Action 'parse_failed' -Detail ('raw output stored, parser did not match; source_file=' + $file.LocalPath) -Level WARN
                 }
 
@@ -1238,15 +1261,17 @@ try {
         }
         catch {
             Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_exception' -CollectedAtUtc ((Get-Date).ToUniversalTime().ToString('o')) -ErrorMessage $_.Exception.Message
-            Log -Level ERROR -Message "Collect exception for $($node.IP): $($_.Exception.Message)"
             Log-NodeAction -Node $node -Action 'collect_exception' -Detail $_.Exception.Message -Level ERROR
         }
     }
 
+    Write-Progress -Id 2 -Activity 'Collecting node results' -Completed
+    Update-ConsoleStatus -Complete
     Complete-MeasurementRun -Config $config -RunId $RunId -ReachableNodes $reachableCount -CollectedNodes $collectedCount -ParsedNodes $parsedCount -Status 'completed'
     Log -Message "Run summary: total=$($nodes.Count), reachable=$reachableCount, collected_nodes=$collectedCount, collected_files=$collectedFileCount, parsed=$parsedCount"
 }
 catch {
+    Update-ConsoleStatus -Complete
     if ($script:CurrentConfig -and $RunId) {
         try {
             Complete-MeasurementRun -Config $script:CurrentConfig -RunId $RunId -ReachableNodes 0 -CollectedNodes 0 -ParsedNodes 0 -Status 'failed' -Notes $_.Exception.Message
