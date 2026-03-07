@@ -34,10 +34,16 @@ Describe 'Parse-MeasurementOutput' {
     }
 
 
-    It 'returns null for failed or invalid speedtest markers' {
-        Parse-MeasurementOutput -RawOutput 'wget_failed exit=4 bytes=0 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" start=1772839860' | Should -BeNullOrEmpty
-        Parse-MeasurementOutput -RawOutput 'speedtest_invalid bytes=0 sec=0 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" start=1772839860' | Should -BeNullOrEmpty
-        Parse-MeasurementOutput -RawOutput 'speedtest_size_mismatch bytes=104857599 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" start=1772839860' | Should -BeNullOrEmpty
+    It 'parses final failed speedtest markers with zero throughput' {
+        $failed = Parse-MeasurementOutput -RawOutput 'wget_failed,nodeid=001122334455 exit=4 bytes=0 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+        $invalid = Parse-MeasurementOutput -RawOutput 'speedtest_invalid,nodeid=001122334455 bytes=0 sec=0 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+        $mismatch = Parse-MeasurementOutput -RawOutput 'speedtest_size_mismatch,nodeid=001122334455 bytes=104857599 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+
+        $failed.ResultType | Should -Be 'final_failed'
+        $failed.FailureReason | Should -Be 'wget_failed'
+        $failed.ThroughputMbit | Should -Be 0
+        $invalid.FailureReason | Should -Be 'speedtest_invalid'
+        $mismatch.FailureReason | Should -Be 'speedtest_size_mismatch'
     }
     It 'returns null for empty payload' {
         $parsed = Parse-MeasurementOutput -RawOutput ''
@@ -164,7 +170,7 @@ Describe 'Get-NodeTriggerCommandInfo' {
         $info.TriggerCommand | Should -Match 'wget_exit_file='
         $info.TriggerCommand | Should -Match 'wc -c'
         $info.TriggerCommand | Should -Match 'expected_bytes="?123456789"?'
-        $info.TriggerCommand | Should -Match 'speedtest_size_mismatch bytes='
+        $info.TriggerCommand | Should -Match 'speedtest_size_mismatch,nodeid='
     }
 }
 
@@ -342,6 +348,47 @@ Describe 'Collect-NodeResults' {
         $result.ErrorOutput | Should -Match 'delete failed'
         (Test-Path -Path $files[0].LocalPath -PathType Leaf) | Should -BeTrue
         $files[0].RawOutput | Should -Match '^speedtest,nodeid=aabbccddeeff'
+    }
+
+    It 'treats final failed results as collected measurements' {
+        $mockSsh = Join-Path $TestDrive 'mock-ssh-final-failed.ps1'
+        @(
+            '$command = $args[-1]'
+            'if ($command -like ''find*'') {'
+            '    @('
+            '        ''__FFMH_FILE_BEGIN__/tmp/harvester/1700000000.txt'''
+            '        ''wget_failed,nodeid=aabbccddeeff exit=4 bytes=0 expected_bytes=104857600 target="https://example.invalid/test.bin" 1700000000000000000'''
+            '        ''__FFMH_FILE_END__/tmp/harvester/1700000000.txt'''
+            '    ) | ForEach-Object { Write-Output $_ }'
+            '    exit 0'
+            '}'
+            'if ($command -like ''rm -f*'') {'
+            '    exit 0'
+            '}'
+            'Write-Output ("unexpected command: {0}" -f $command)'
+            'exit 9'
+        ) | Set-Content -Path $mockSsh
+
+        $rawDir = Join-Path $TestDrive 'raw-final-failed'
+        New-Item -ItemType Directory -Path $rawDir -Force | Out-Null
+
+        $config = @{
+            SshBinary = $mockSsh
+            SshKeyPath = 'ignore'
+            SshUser = 'root'
+            SshConnectTimeoutSeconds = 1
+            RemoteResultDir = '/tmp/harvester'
+            CollectParallelism = 2
+        }
+        $node = [pscustomobject]@{ DeviceID = 'node-001'; Name = 'Node 1'; IP = '2a03:2260::1'; Domain = 'dom-a' }
+
+        $result = Collect-NodeResults -Config $config -Node $node -RunId 'run-test' -RawDir $rawDir
+        $files = @($result.Files)
+
+        $result.Success | Should -BeTrue
+        $files.Count | Should -Be 1
+        $files[0].ParsedMeasurement.ResultType | Should -Be 'final_failed'
+        $files[0].ParsedMeasurement.ThroughputMbit | Should -Be 0
     }
 }
 

@@ -39,7 +39,7 @@ Detailed per-node trigger and collect state tracking.
 - `name` TEXT
 - `ip` TEXT
 - `domain` TEXT
-- `status` TEXT (for example `triggered`, `trigger_failed`, `collected`, `collect_pending`)
+- `status` TEXT (for example `triggered`, `trigger_failed`, `collected`, `collected_failed_result`, `collect_pending`)
 - `triggered_at_utc` TEXT
 - `collected_at_utc` TEXT
 - `result_file` TEXT
@@ -77,5 +77,6 @@ The schema also creates operational indexes for the main query paths:
 
 ## Notes
 - Raw files are also stored in `data/raw/<run_id>/`.
+- Final failed speedtest results are also stored in `measurements`; they use `throughput_mbit = 0` and preserve the raw failure payload.
 - Schema initialization runs automatically inside `collect-node-metrics.ps1`.
 - WAL mode is enabled for the database.

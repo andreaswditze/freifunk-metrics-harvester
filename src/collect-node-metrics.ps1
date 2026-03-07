@@ -862,7 +862,7 @@ function Test-NodeResultFinished {
     $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $Config.RemoteResultDir
     $probeCmd = @"
 find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while IFS= read -r file; do
-    if grep -Eq '^(speedtest,nodeid=|wget_failed |speedtest_invalid |speedtest_size_mismatch )' "`$file"; then
+    if grep -Eq '^(speedtest,nodeid=|wget_failed,nodeid=|speedtest_invalid,nodeid=|speedtest_size_mismatch,nodeid=)' "`$file"; then
         printf '%s\n' "`$file"
         break
     fi
@@ -952,15 +952,15 @@ rm -f "`$wget_exit_file"
 awk -v nodeid="`$nodeid" -v start="`$start" -v t0="`$t0" -v t1="`$t1" -v target="`$target_url" -v bytes="`$bytes" -v wget_exit="`$wget_exit" -v expected_bytes="$targetBytes" 'BEGIN{
     sec=t1-t0
     if (wget_exit != 0) {
-        printf "wget_failed exit=%s bytes=%s expected_bytes=%s target=\"%s\" start=%s\n",wget_exit,bytes,expected_bytes,target,start
+        printf "wget_failed,nodeid=%s exit=%s bytes=%s expected_bytes=%s target=\"%s\" %s\n",nodeid,wget_exit,bytes,expected_bytes,target,start
         exit 0
     }
     if (bytes <= 0 || sec <= 0) {
-        printf "speedtest_invalid bytes=%s sec=%s expected_bytes=%s target=\"%s\" start=%s\n",bytes,sec,expected_bytes,target,start
+        printf "speedtest_invalid,nodeid=%s bytes=%s sec=%s expected_bytes=%s target=\"%s\" %s\n",nodeid,bytes,sec,expected_bytes,target,start
         exit 0
     }
     if (bytes != expected_bytes) {
-        printf "speedtest_size_mismatch bytes=%s expected_bytes=%s target=\"%s\" start=%s\n",bytes,expected_bytes,target,start
+        printf "speedtest_size_mismatch,nodeid=%s bytes=%s expected_bytes=%s target=\"%s\" %s\n",nodeid,bytes,expected_bytes,target,start
         exit 0
     }
     printf "speedtest,nodeid=%s download_mbit=%.2f,target=\"%s\" %s\n",nodeid,(bytes*8)/(sec*1000000),target,start
@@ -1155,22 +1155,6 @@ function Convert-CollectStreamToFiles {
     return @($records.ToArray())
 }
 
-function Test-CollectFileHasMeasurementLine {
-    [CmdletBinding()]
-    param(
-        [AllowEmptyString()]
-        [string]$RawOutput
-    )
-
-    foreach ($line in ($RawOutput -split '\r?\n')) {
-        if ($line -match '^speedtest,nodeid=') {
-            return $true
-        }
-    }
-
-    return $false
-}
-
 function Collect-NodeResults {
     [CmdletBinding()]
     param(
@@ -1241,7 +1225,8 @@ find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while
 
         Set-Content -Path $localPath -Value $trimmedRawOutput
 
-        if (-not (Test-CollectFileHasMeasurementLine -RawOutput $trimmedRawOutput)) {
+        $parsedMeasurement = Parse-MeasurementOutput -RawOutput $trimmedRawOutput
+        if ($null -eq $parsedMeasurement) {
             $pendingFiles += [pscustomobject]@{
                 RemotePath = $remotePath
                 LocalPath  = $localPath
@@ -1252,9 +1237,10 @@ find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while
         }
 
         $downloaded += [pscustomobject]@{
-            RemotePath = $remotePath
-            LocalPath  = $localPath
-            RawOutput  = $trimmedRawOutput
+            RemotePath        = $remotePath
+            LocalPath         = $localPath
+            RawOutput         = $trimmedRawOutput
+            ParsedMeasurement = $parsedMeasurement
         }
     }
 
@@ -1367,7 +1353,6 @@ function Invoke-NodeCollectBatch {
             }
         } -ThrottleLimit $throttle
 }
-
 function Parse-MeasurementOutput {
     [CmdletBinding()]
     param(
@@ -1376,12 +1361,12 @@ function Parse-MeasurementOutput {
         [string]$RawOutput
     )
 
-
     if ([string]::IsNullOrWhiteSpace($RawOutput)) {
         return $null
     }
 
-    $regex = '^speedtest,nodeid=(?<nodeid>[^ ]+)\s+download_mbit=(?<download>[0-9]+(?:\.[0-9]+)?),target="(?<target>[^"]+)"\s+(?<timestamp>[0-9]+)$'
+    $successRegex = '^speedtest,nodeid=(?<nodeid>[^ ]+)\s+download_mbit=(?<download>[0-9]+(?:\.[0-9]+)?),target="(?<target>[^"]+)"\s+(?<timestamp>[0-9]+)$'
+    $failureRegex = '^(?<kind>wget_failed|speedtest_invalid|speedtest_size_mismatch),nodeid=(?<nodeid>[^ ]+)\s+.*target="(?<target>[^"]+)"\s+(?<timestamp>[0-9]+)$'
 
     $lines = @(
         $RawOutput -split '\r?\n' |
@@ -1390,16 +1375,28 @@ function Parse-MeasurementOutput {
     )
 
     foreach ($line in $lines) {
-        $match = [regex]::Match($line, $regex)
-        if (-not $match.Success) {
-            continue
+        $successMatch = [regex]::Match($line, $successRegex)
+        if ($successMatch.Success) {
+            return [pscustomobject]@{
+                NodeId         = $successMatch.Groups['nodeid'].Value
+                ThroughputMbit = [double]::Parse($successMatch.Groups['download'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
+                Target         = $successMatch.Groups['target'].Value
+                TimestampNs    = $successMatch.Groups['timestamp'].Value
+                ResultType     = 'success'
+                FailureReason  = ''
+            }
         }
 
-        return [pscustomobject]@{
-            NodeId         = $match.Groups['nodeid'].Value
-            ThroughputMbit = [double]::Parse($match.Groups['download'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
-            Target         = $match.Groups['target'].Value
-            TimestampNs    = $match.Groups['timestamp'].Value
+        $failureMatch = [regex]::Match($line, $failureRegex)
+        if ($failureMatch.Success) {
+            return [pscustomobject]@{
+                NodeId         = $failureMatch.Groups['nodeid'].Value
+                ThroughputMbit = 0.0
+                Target         = $failureMatch.Groups['target'].Value
+                TimestampNs    = $failureMatch.Groups['timestamp'].Value
+                ResultType     = 'final_failed'
+                FailureReason  = $failureMatch.Groups['kind'].Value
+            }
         }
     }
 
@@ -1629,7 +1626,7 @@ try {
 
             if ($pendingFiles.Count -gt 0) {
                 $pendingSummary = 'pending_files=' + $pendingFiles.Count + '; first_file=' + $pendingFiles[0].LocalPath + '; raw_size=' + $pendingFiles[0].RawSize
-                Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_pending' -CollectedAtUtc $collectedAtUtc -ResultFile ((@($pendingFiles | ForEach-Object { $_.LocalPath }) -join ';') ) -ErrorMessage $pendingSummary
+                Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_pending' -CollectedAtUtc $collectedAtUtc -ResultFile ((@($pendingFiles | ForEach-Object { $_.LocalPath }) -join ';' ) ) -ErrorMessage $pendingSummary
                 Log-NodeAction -Node $node -Action 'collect_pending' -Detail $pendingSummary -Level WARN
             }
 
@@ -1647,15 +1644,23 @@ try {
             $collectedCount++
             $collectedFileCount += $collectedFiles.Count
 
-            $resultFiles = (@($collectedFiles | ForEach-Object { $_.LocalPath }) -join ';')
-            Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collected' -CollectedAtUtc $collectedAtUtc -ResultFile $resultFiles -ErrorFile '' -ErrorMessage $collect.ErrorOutput
-            Log-NodeAction -Node $node -Action 'collect_success' -Detail ('files=' + $collectedFiles.Count + '; first_file=' + $collectedFiles[0].LocalPath)
+            $successfulFiles = @($collectedFiles | Where-Object { $_.ParsedMeasurement.ResultType -eq 'success' })
+            $failedFiles = @($collectedFiles | Where-Object { $_.ParsedMeasurement.ResultType -eq 'final_failed' })
+            $nodeStatus = if ($successfulFiles.Count -gt 0 -and $failedFiles.Count -gt 0) { 'collected_mixed' } elseif ($successfulFiles.Count -gt 0) { 'collected' } else { 'collected_failed_result' }
+
+            $resultFiles = (@($collectedFiles | ForEach-Object { $_.LocalPath }) -join ';' )
+            Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status $nodeStatus -CollectedAtUtc $collectedAtUtc -ResultFile $resultFiles -ErrorFile '' -ErrorMessage $collect.ErrorOutput
+            Log-NodeAction -Node $node -Action 'collect_success' -Detail ('files=' + $collectedFiles.Count + '; success=' + $successfulFiles.Count + '; final_failed=' + $failedFiles.Count + '; first_file=' + $collectedFiles[0].LocalPath)
 
             foreach ($file in $collectedFiles) {
-                $parsed = Parse-MeasurementOutput -RawOutput $file.RawOutput
-                if ($parsed) {
+                $parsed = $file.ParsedMeasurement
+                if ($parsed.ResultType -eq 'success') {
                     $parsedCount++
                     Log-NodeAction -Node $node -Action 'parse_success' -Detail ('nodeid=' + $parsed.NodeId + '; throughput_mbit=' + $parsed.ThroughputMbit + '; source_file=' + $file.LocalPath)
+                }
+                elseif ($parsed.ResultType -eq 'final_failed') {
+                    $parsedCount++
+                    Log-NodeAction -Node $node -Action 'parse_final_failed' -Detail ('nodeid=' + $parsed.NodeId + '; failure_reason=' + $parsed.FailureReason + '; throughput_mbit=0; source_file=' + $file.LocalPath) -Level WARN
                 }
                 else {
                     Log-NodeAction -Node $node -Action 'parse_failed' -Detail ('raw output stored, parser did not match; source_file=' + $file.LocalPath) -Level WARN
