@@ -122,7 +122,7 @@ function Wait-WithProgress {
 
     $nodeCount = @($Nodes).Count
     $pollInterval = [Math]::Max(1, $PollIntervalSeconds)
-    $readyCount = -1
+    $finishedCount = -1
 
     for ($elapsed = 0; $elapsed -lt $Seconds; $elapsed++) {
         $remaining = $Seconds - $elapsed
@@ -130,16 +130,16 @@ function Wait-WithProgress {
 
         if ($nodeCount -gt 0 -and (($elapsed -eq 0) -or (($elapsed % $pollInterval) -eq 0))) {
             try {
-                $readyCount = Get-ReadyNodeResultCountBatch -Config $Config -Nodes $Nodes
+                $finishedCount = Get-FinishedNodeResultCountBatch -Config $Config -Nodes $Nodes
             }
             catch {
-                $readyCount = -1
+                $finishedCount = -1
             }
         }
 
-        if ($nodeCount -gt 0 -and $readyCount -ge 0) {
-            $status = 'Remaining: {0}s | ready: {1}/{2}' -f $remaining, $readyCount, $nodeCount
-            Update-ConsoleStatus -Message ('Wait {0}/{1}s: ready {2}/{3} nodes' -f $elapsed, $Seconds, $readyCount, $nodeCount)
+        if ($nodeCount -gt 0 -and $finishedCount -ge 0) {
+            $status = 'Remaining: {0}s | finished: {1}/{2}' -f $remaining, $finishedCount, $nodeCount
+            Update-ConsoleStatus -Message ('Wait {0}/{1}s: finished {2}/{3} nodes' -f $elapsed, $Seconds, $finishedCount, $nodeCount)
         }
         else {
             $status = 'Remaining: {0}s' -f $remaining
@@ -849,7 +849,7 @@ function New-SshArgs {
     )
 }
 
-function Test-NodeResultReady {
+function Test-NodeResultFinished {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -860,7 +860,14 @@ function Test-NodeResultReady {
 
     $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
     $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $Config.RemoteResultDir
-    $probeCmd = "find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print -quit"
+    $probeCmd = @"
+find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while IFS= read -r file; do
+    if grep -Eq '^(speedtest,nodeid=|wget_failed |speedtest_invalid |speedtest_size_mismatch )' "`$file"; then
+        printf '%s\n' "`$file"
+        break
+    fi
+done
+"@
     $output = & $Config.SshBinary @sshArgs $probeCmd 2>&1
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) {
@@ -871,7 +878,7 @@ function Test-NodeResultReady {
     return -not [string]::IsNullOrWhiteSpace($text)
 }
 
-function Get-ReadyNodeResultCountBatch {
+function Get-FinishedNodeResultCountBatch {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -893,7 +900,7 @@ function Get-ReadyNodeResultCountBatch {
 
     $parallelism = [Math]::Max(1, [int]([Math]::Min([Math]::Max(1, [int]$Config.CollectParallelism), $indexedNodes.Count)))
     if ($parallelism -le 1 -or $indexedNodes.Count -le 1) {
-        return @($indexedNodes | Where-Object { Test-NodeResultReady -Config $Config -Node $_.Node }).Count
+        return @($indexedNodes | Where-Object { Test-NodeResultFinished -Config $Config -Node $_.Node }).Count
     }
 
     $batchConfig = $Config
@@ -905,7 +912,7 @@ function Get-ReadyNodeResultCountBatch {
                 $config = $using:batchConfig
                 $scriptPath = $using:selfScriptPath
                 . $scriptPath -NoRun
-                if (Test-NodeResultReady -Config $config -Node $item.Node) {
+                if (Test-NodeResultFinished -Config $config -Node $item.Node) {
                     $item.Index
                 }
             } -ThrottleLimit $parallelism
@@ -1683,6 +1690,7 @@ catch {
     exit 1
 }
 }
+
 
 
 

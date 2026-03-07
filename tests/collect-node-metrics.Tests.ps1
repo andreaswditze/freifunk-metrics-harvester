@@ -346,8 +346,8 @@ Describe 'Collect-NodeResults' {
 }
 
 
-Describe 'Get-ReadyNodeResultCountBatch' {
-    It 'counts nodes with available remote result files' {
+Describe 'Get-FinishedNodeResultCountBatch' {
+    It 'counts nodes with finished remote result files' {
         $mockSsh = Join-Path $TestDrive 'mock-ssh-ready.ps1'
         @(
             '$command = $args[-1]'
@@ -373,7 +373,7 @@ Describe 'Get-ReadyNodeResultCountBatch' {
             [pscustomobject]@{ DeviceID = 'node-002'; Name = 'Node 2'; IP = '2a03:2260::2'; Domain = 'dom-b' }
         )
 
-        Get-ReadyNodeResultCountBatch -Config $config -Nodes $nodes | Should -Be 1
+        Get-FinishedNodeResultCountBatch -Config $config -Nodes $nodes | Should -Be 1
     }
 }
 
@@ -427,3 +427,4 @@ Describe 'Invoke-NodeCollectBatch' {
         @($sorted[1].CollectResult.Files).Count | Should -Be 1
     }
 }
+
