@@ -556,7 +556,14 @@ function Import-NodeListFromExcel {
     $importExcelAvailable = $false
     if (Get-Module -ListAvailable -Name ImportExcel) {
         $importExcelAvailable = $true
-        Import-Module ImportExcel -ErrorAction Stop -WarningAction SilentlyContinue | Out-Null
+        $previousWarningPreference = $WarningPreference
+        try {
+            $WarningPreference = 'SilentlyContinue'
+            Import-Module ImportExcel -ErrorAction Stop | Out-Null
+        }
+        finally {
+            $WarningPreference = $previousWarningPreference
+        }
     }
 
     foreach ($filePath in $sourceFiles) {
