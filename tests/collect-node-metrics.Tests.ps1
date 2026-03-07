@@ -97,3 +97,47 @@ Describe 'Convert-NodeTimestampToUtc' {
         $utc | Should -Match '^2026-03-06T23:31:00\.123'
     }
 }
+
+Describe 'Test-NodeReleaseSupported' {
+    It 'accepts 1.5.0 and newer releases' {
+        Test-NodeReleaseSupported -Release '1.5.0' | Should -BeTrue
+        Test-NodeReleaseSupported -Release '1.5.1' | Should -BeTrue
+        Test-NodeReleaseSupported -Release 'v1.6.0' | Should -BeTrue
+    }
+
+    It 'rejects empty, invalid, and older releases' {
+        Test-NodeReleaseSupported -Release '' | Should -BeFalse
+        Test-NodeReleaseSupported -Release '1.4.9' | Should -BeFalse
+        Test-NodeReleaseSupported -Release 'snapshot' | Should -BeFalse
+    }
+}
+
+Describe 'Import-NodeListFromExcel' {
+    It 'imports only nodes with IP and release 1.5.0 or newer from csv' {
+        $csvPath = Join-Path $TestDrive 'node_routerliste.csv'
+        @(
+            'DeviceID,Type,Owner,District,Location,LocalContactName,LocalContactPhone,LocalContactMail,Notes,Name,MapLink,IP,Outdoor,Domain,VPNMesh,Speedlimit,Branch,Autoupdater,SSHKeys,Release,VLAN,Backup'
+            'node-001,,,,,,,,,Node 1,,2a03:2260::1,,dom-a,,,,,,1.5.0,,'
+            'node-002,,,,,,,,,Node 2,,2a03:2260::2,,dom-a,,,,,,1.4.9,,'
+            'node-003,,,,,,,,,Node 3,,,,dom-a,,,,,,1.5.2,,'
+            'node-004,,,,,,,,,Node 4,,2a03:2260::4,,dom-b,,,,,,,,'
+            'node-005,,,,,,,,,Node 5,,2a03:2260::5,,dom-b,,,,,,v1.6.0,,'
+        ) | Set-Content -Path $csvPath
+
+        $config = @{
+            ExcelInputFiles       = @($csvPath)
+            ExcelInputDirectories = @()
+            ExcelSearchRecurse    = $false
+        }
+
+        $result = Import-NodeListFromExcel -Config $config
+        $nodes = @($result.Nodes)
+
+        $nodes.Count | Should -Be 2
+        $nodes.DeviceID | Should -Contain 'node-001'
+        $nodes.DeviceID | Should -Contain 'node-005'
+        $nodes.DeviceID | Should -Not -Contain 'node-002'
+        $nodes.DeviceID | Should -Not -Contain 'node-003'
+        $nodes.DeviceID | Should -Not -Contain 'node-004'
+    }
+}

@@ -260,6 +260,32 @@ function Test-ValidNodeRow {
     return $true
 }
 
+function Test-NodeReleaseSupported {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [string]$Release,
+        [version]$MinimumRelease = [version]'1.5.0'
+    )
+
+    $trimmed = Convert-ToTrimmedString -Value $Release
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        return $false
+    }
+
+    $normalized = $trimmed
+    if ($normalized.StartsWith('v', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $normalized = $normalized.Substring(1)
+    }
+
+    $parsedVersion = $null
+    if (-not [version]::TryParse($normalized, [ref]$parsedVersion)) {
+        return $false
+    }
+
+    return $parsedVersion -ge $MinimumRelease
+}
+
 function Get-NormalizedIP {
     [CmdletBinding()]
     param(
@@ -434,9 +460,15 @@ function Import-NodeListFromExcel {
                 Name     = (Get-RowValue -Row $row -Candidates @('Name', 'Hostname', 'NodeName'))
                 IP       = (Get-RowValue -Row $row -Candidates @('IP', 'IPv4', 'Address', 'NodeIP'))
                 Domain   = (Get-RowValue -Row $row -Candidates @('Domain', 'Segment', 'Community'))
+                Release  = (Get-RowValue -Row $row -Candidates @('Release'))
             }
 
             if (-not (Test-ValidNodeRow -Row $node)) {
+                $skipped++
+                continue
+            }
+
+            if (-not (Test-NodeReleaseSupported -Release $node.Release)) {
                 $skipped++
                 continue
             }
@@ -1091,10 +1123,4 @@ catch {
     exit 1
 }
 }
-
-
-
-
-
-
 
