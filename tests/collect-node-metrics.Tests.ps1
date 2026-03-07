@@ -9,7 +9,7 @@ AfterAll {
 
 Describe 'Module entry points' {
     It 'exports collector functions from the module' {
-        (Get-Command Parse-MeasurementOutput -ErrorAction Stop).Source | Should -Be 'FreifunkMetrics'
+        (Get-Command ConvertFrom-MeasurementOutput -ErrorAction Stop).Source | Should -Be 'FreifunkMetrics'
         (Get-Command Invoke-CollectNodeMetricsMain -ErrorAction Stop).Source | Should -Be 'FreifunkMetrics'
     }
 
@@ -17,14 +17,14 @@ Describe 'Module entry points' {
         Remove-Module FreifunkMetrics -ErrorAction SilentlyContinue
         . "$PSScriptRoot/../src/collect-node-metrics.ps1" -NoRun
 
-        (Get-Command Parse-MeasurementOutput -ErrorAction Stop).Source | Should -Be 'FreifunkMetrics'
+        (Get-Command ConvertFrom-MeasurementOutput -ErrorAction Stop).Source | Should -Be 'FreifunkMetrics'
     }
 }
 
-Describe 'Parse-MeasurementOutput' {
+Describe 'ConvertFrom-MeasurementOutput' {
     It 'parses valid line protocol' {
         $raw = 'speedtest,nodeid=001122334455 download_mbit=87.32,target="https://fsn1-speed.hetzner.com/100MB.bin" 1731000000000000000'
-        $parsed = Parse-MeasurementOutput -RawOutput $raw
+        $parsed = ConvertFrom-MeasurementOutput -RawOutput $raw
 
         $parsed | Should -Not -BeNullOrEmpty
         $parsed.NodeId | Should -Be '001122334455'
@@ -40,7 +40,7 @@ Describe 'Parse-MeasurementOutput' {
             'Hostname: Test-Node'
             'speedtest,nodeid=aabbccddeeff download_mbit=10.75,target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
         ) -join "`n"
-        $parsed = Parse-MeasurementOutput -RawOutput $raw
+        $parsed = ConvertFrom-MeasurementOutput -RawOutput $raw
 
         $parsed | Should -Not -BeNullOrEmpty
         $parsed.NodeId | Should -Be 'aabbccddeeff'
@@ -48,15 +48,15 @@ Describe 'Parse-MeasurementOutput' {
         $parsed.TimestampNs | Should -Be '1772839860'
     }
     It 'returns null for invalid payload' {
-        $parsed = Parse-MeasurementOutput -RawOutput 'invalid payload'
+        $parsed = ConvertFrom-MeasurementOutput -RawOutput 'invalid payload'
         $parsed | Should -BeNullOrEmpty
     }
 
 
     It 'parses final failed speedtest markers with zero throughput' {
-        $failed = Parse-MeasurementOutput -RawOutput 'wget_failed,nodeid=001122334455 exit=4 bytes=0 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
-        $invalid = Parse-MeasurementOutput -RawOutput 'speedtest_invalid,nodeid=001122334455 bytes=0 sec=0 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
-        $mismatch = Parse-MeasurementOutput -RawOutput 'speedtest_size_mismatch,nodeid=001122334455 bytes=104857599 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+        $failed = ConvertFrom-MeasurementOutput -RawOutput 'wget_failed,nodeid=001122334455 exit=4 bytes=0 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+        $invalid = ConvertFrom-MeasurementOutput -RawOutput 'speedtest_invalid,nodeid=001122334455 bytes=0 sec=0 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+        $mismatch = ConvertFrom-MeasurementOutput -RawOutput 'speedtest_size_mismatch,nodeid=001122334455 bytes=104857599 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
 
         $failed.ResultType | Should -Be 'final_failed'
         $failed.FailureReason | Should -Be 'wget_failed'
@@ -65,7 +65,7 @@ Describe 'Parse-MeasurementOutput' {
         $mismatch.FailureReason | Should -Be 'speedtest_size_mismatch'
     }
     It 'returns null for empty payload' {
-        $parsed = Parse-MeasurementOutput -RawOutput ''
+        $parsed = ConvertFrom-MeasurementOutput -RawOutput ''
         $parsed | Should -BeNullOrEmpty
     }
 }
@@ -216,27 +216,30 @@ Describe 'SSH streaming integration' -Tag 'ssh-streaming' {
         $failures = New-Object System.Collections.Generic.List[string]
 
         foreach ($node in $nodes) {
-            $remoteFile = ('{0}/pester-ssh-streaming-{1}.txt' -f $config.RemoteResultDir.TrimEnd('/'), ([guid]::NewGuid().ToString('N')))
-            $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $config.RemoteResultDir
+            $collectConfig = @{} + $config
+            $collectConfig.RemoteResultDir = ('{0}/pester-ssh-streaming-{1}' -f $config.RemoteResultDir.TrimEnd('/'), ([guid]::NewGuid().ToString('N')))
+            $remoteFile = ('{0}/result.txt' -f $collectConfig.RemoteResultDir)
+            $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $collectConfig.RemoteResultDir
             $remoteFileEscaped = Convert-ToShellSingleQuoted -Value $remoteFile
             $payload = 'speedtest,nodeid=pester download_mbit=12.34,target="https://example.invalid/test.bin" 1772839860'
             $payloadEscaped = Convert-ToShellSingleQuoted -Value $payload
-            $sshArgs = New-SshArgs -Config $config -NodeIp $node.IP
+            $sshArgs = New-SshArgs -Config $collectConfig -NodeIp $node.IP
 
             try {
                 $prepareCmd = "mkdir -p '$remoteDirEscaped'; printf '%s\n' '$payloadEscaped' > '$remoteFileEscaped'"
-                $prepareOutput = & $config.SshBinary @sshArgs $prepareCmd 2>&1
+                $prepareOutput = & $collectConfig.SshBinary @sshArgs $prepareCmd 2>&1
                 if ($LASTEXITCODE -ne 0) {
                     throw "prepare failed: $($prepareOutput -join ' ')"
                 }
 
-                $result = Collect-NodeResults -Config $config -Node $node -RunId 'run-ssh-streaming' -RawDir $rawDir
+                $result = Receive-NodeResults -Config $collectConfig -Node $node -RunId 'run-ssh-streaming' -RawDir $rawDir
                 $files = @($result.Files)
                 if (-not $result.Success) {
                     throw "collect failed: $($result.ErrorOutput)"
                 }
 
                 $files.Count | Should -Be 1
+                $files[0].RemotePath | Should -Be $remoteFile
                 $files[0].ParsedMeasurement.ResultType | Should -Be 'success'
                 $files[0].ParsedMeasurement.NodeId | Should -Be 'pester'
                 $files[0].RawOutput | Should -Match '^speedtest,nodeid=pester'
@@ -247,8 +250,8 @@ Describe 'SSH streaming integration' -Tag 'ssh-streaming' {
                 $failures.Add(($node.IP + ': ' + $_.Exception.Message))
             }
             finally {
-                $cleanupCmd = "rm -f '$remoteFileEscaped'"
-                & $config.SshBinary @sshArgs $cleanupCmd 2>$null | Out-Null
+                $cleanupCmd = "rm -f '$remoteFileEscaped'; rmdir '$remoteDirEscaped' >/dev/null 2>&1 || true"
+                & $collectConfig.SshBinary @sshArgs $cleanupCmd 2>$null | Out-Null
             }
         }
 
@@ -387,7 +390,7 @@ Describe 'Convert-CollectStreamToFiles' {
     }
 }
 
-Describe 'Collect-NodeResults' {
+Describe 'Receive-NodeResults' {
     It 'keeps downloaded measurements when remote delete fails' {
         $mockSsh = Join-Path $TestDrive 'mock-ssh-delete-fail.ps1'
         @(
@@ -421,7 +424,7 @@ Describe 'Collect-NodeResults' {
         }
         $node = [pscustomobject]@{ DeviceID = 'node-001'; Name = 'Node 1'; IP = '2a03:2260::1'; Domain = 'dom-a' }
 
-        $result = Collect-NodeResults -Config $config -Node $node -RunId 'run-test' -RawDir $rawDir
+        $result = Receive-NodeResults -Config $config -Node $node -RunId 'run-test' -RawDir $rawDir
         $files = @($result.Files)
 
         $result.Success | Should -BeTrue
@@ -463,7 +466,7 @@ Describe 'Collect-NodeResults' {
         }
         $node = [pscustomobject]@{ DeviceID = 'node-001'; Name = 'Node 1'; IP = '2a03:2260::1'; Domain = 'dom-a' }
 
-        $result = Collect-NodeResults -Config $config -Node $node -RunId 'run-test' -RawDir $rawDir
+        $result = Receive-NodeResults -Config $config -Node $node -RunId 'run-test' -RawDir $rawDir
         $files = @($result.Files)
 
         $result.Success | Should -BeTrue
@@ -555,4 +558,8 @@ Describe 'Invoke-NodeCollectBatch' {
         @($sorted[1].CollectResult.Files).Count | Should -Be 1
     }
 }
+
+
+
+
 

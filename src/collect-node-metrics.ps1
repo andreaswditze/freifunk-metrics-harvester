@@ -21,3 +21,6 @@ Import-Module (Join-Path $PSScriptRoot 'FreifunkMetrics.psm1') -Force | Out-Null
 if (-not $NoRun) {
     Invoke-CollectNodeMetricsMain -ConfigPath $ConfigPath -RunId $RunId -VerboseLogging:$VerboseLogging
 }
+
+
+

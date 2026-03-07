@@ -94,14 +94,14 @@ function Resolve-NodeSourceFiles {
             $resolved.Add((Resolve-Path -Path $path).Path)
         }
         else {
-            Log -Level WARN -Message "Excel file path missing: ${path}"
+            Write-Log -Level WARN -Message "Excel file path missing: ${path}"
         }
     }
     $extensions = @('*.xlsx', '*.xlsm', '*.xls', '*.csv')
     foreach ($dir in @($Config.ExcelInputDirectories)) {
         if ([string]::IsNullOrWhiteSpace([string]$dir)) { continue }
         if (-not (Test-Path -Path $dir -PathType Container)) {
-            Log -Level WARN -Message "Excel input directory missing: ${dir}"
+            Write-Log -Level WARN -Message "Excel input directory missing: ${dir}"
             continue
         }
 
@@ -177,7 +177,7 @@ function Import-NodeListFromExcel {
 
     foreach ($filePath in $sourceFiles) {
         if (-not (Test-Path -Path $filePath -PathType Leaf)) {
-            Log -Level WARN -Message "Excel source missing: ${filePath}"
+            Write-Log -Level WARN -Message "Excel source missing: ${filePath}"
             continue
         }
 
@@ -186,7 +186,7 @@ function Import-NodeListFromExcel {
         $rows = @()
 
         if ($baseName -match '(?i)^vorlage_.*\\.xlsx$') {
-            Log -Level WARN -Message "Skipping template workbook by naming rule: ${filePath}"
+            Write-Log -Level WARN -Message "Skipping template workbook by naming rule: ${filePath}"
             continue
         }
 
@@ -204,7 +204,7 @@ function Import-NodeListFromExcel {
             catch {
                 $message = $_.Exception.Message
                 if ($message -match 'No column headers found on top row') {
-                    Log -Level WARN -Message "Skipping workbook without header row: ${filePath}"
+                    Write-Log -Level WARN -Message "Skipping workbook without header row: ${filePath}"
                     continue
                 }
 
@@ -212,7 +212,7 @@ function Import-NodeListFromExcel {
             }
         }
         else {
-            Log -Level WARN -Message "Skipping unsupported file extension: ${filePath}"
+            Write-Log -Level WARN -Message "Skipping unsupported file extension: ${filePath}"
             continue
         }
 
@@ -243,7 +243,7 @@ function Import-NodeListFromExcel {
             $imported++
         }
 
-        Log -Message "Excel import done for ${filePath}: imported=${imported}, skipped=${skipped}"
+        Write-Log -Message "Excel import done for ${filePath}: imported=${imported}, skipped=${skipped}"
     }
 
     $uniqueNodes = $allNodes |
@@ -255,3 +255,4 @@ function Import-NodeListFromExcel {
         SourceFiles = $sourceFiles
     }
 }
+

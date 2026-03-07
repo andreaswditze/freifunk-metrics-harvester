@@ -39,7 +39,7 @@ function Show-StartupBanner {
     $script:ConsoleBannerShown = $true
 }
 
-function Log {
+function Write-Log {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -60,7 +60,7 @@ function Log {
     }
 }
 
-function Log-NodeAction {
+function Write-NodeActionLog {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -74,7 +74,7 @@ function Log-NodeAction {
 
     $safeDetail = Convert-ToTrimmedString -Value $Detail; $safeDetail = $safeDetail.Replace('"', "'")
     $message = 'NODE action={0} device_id={1} name="{2}" ip={3} domain={4} detail="{5}"' -f $Action, $Node.DeviceID, $Node.Name, $Node.IP, $Node.Domain, $safeDetail
-    Log -Level $Level -Message $message
+    Write-Log -Level $Level -Message $message
 }
 
 function Wait-WithProgress {
@@ -208,3 +208,6 @@ function Convert-NodeTimestampToUtc {
         return ''
     }
 }
+
+
+

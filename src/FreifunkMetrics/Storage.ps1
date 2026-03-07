@@ -25,7 +25,7 @@ function Invoke-Sqlite {
     return $result
 }
 
-function Escape-SqlLiteral {
+function ConvertTo-SqlEscapedLiteral {
     [CmdletBinding()]
     param(
         [AllowNull()]
@@ -114,7 +114,7 @@ CREATE INDEX IF NOT EXISTS idx_measurements_measured_at_utc ON measurements(meas
 "@
 
     Invoke-Sqlite -Config $Config -Sql $ddl | Out-Null
-    Log -Message "Database initialized: $($Config.DatabasePath)"
+    Write-Log -Message "Database initialized: $($Config.DatabasePath)"
 }
 
 function Start-MeasurementRun {
@@ -130,15 +130,15 @@ function Start-MeasurementRun {
     )
 
     $startedUtc = (Get-Date).ToUniversalTime().ToString('o')
-    $sourceJoined = Escape-SqlLiteral -Value ($SourceFiles -join ';')
-    $sql = "INSERT INTO runs (run_id, started_at_utc, status, source_files, total_nodes) VALUES ('$((Escape-SqlLiteral -Value $RunId))', '$startedUtc', 'running', '$sourceJoined', $TotalNodes);"
+    $sourceJoined = ConvertTo-SqlEscapedLiteral -Value ($SourceFiles -join ';')
+    $sql = "INSERT INTO runs (run_id, started_at_utc, status, source_files, total_nodes) VALUES ('$((ConvertTo-SqlEscapedLiteral -Value $RunId))', '$startedUtc', 'running', '$sourceJoined', $TotalNodes);"
 
     Invoke-Sqlite -Config $Config -Sql $sql | Out-Null
 
     $runRawDir = Join-Path $Config.RawResultBaseDir $RunId
     New-Item -ItemType Directory -Path $runRawDir -Force | Out-Null
 
-    Log -Message "Measurement run started: ${RunId}"
+    Write-Log -Message "Measurement run started: ${RunId}"
 
     return [pscustomobject]@{
         RunId        = $RunId
@@ -165,11 +165,11 @@ function Save-Measurement {
 
     $nowUtc = (Get-Date).ToUniversalTime().ToString('o')
 
-    $deviceId = Escape-SqlLiteral -Value $Node.DeviceID
-    $name = Escape-SqlLiteral -Value $Node.Name
-    $ip = Escape-SqlLiteral -Value $Node.IP
-    $domain = Escape-SqlLiteral -Value $Node.Domain
-    $rawEsc = Escape-SqlLiteral -Value $RawOutput
+    $deviceId = ConvertTo-SqlEscapedLiteral -Value $Node.DeviceID
+    $name = ConvertTo-SqlEscapedLiteral -Value $Node.Name
+    $ip = ConvertTo-SqlEscapedLiteral -Value $Node.IP
+    $domain = ConvertTo-SqlEscapedLiteral -Value $Node.Domain
+    $rawEsc = ConvertTo-SqlEscapedLiteral -Value $RawOutput
 
     $upsertNodeSql = "INSERT INTO nodes (device_id, name, ip, domain, first_seen_utc, last_seen_utc) VALUES ('$deviceId', '$name', '$ip', '$domain', '$nowUtc', '$nowUtc') ON CONFLICT(device_id, ip) DO UPDATE SET name = excluded.name, domain = excluded.domain, last_seen_utc = excluded.last_seen_utc;"
     Invoke-Sqlite -Config $Config -Sql $upsertNodeSql | Out-Null
@@ -181,19 +181,19 @@ function Save-Measurement {
     $measuredAtUtc = ''
 
     if ($ParsedMeasurement) {
-        $nodeId = Escape-SqlLiteral -Value $ParsedMeasurement.NodeId
-        $target = Escape-SqlLiteral -Value $ParsedMeasurement.Target
+        $nodeId = ConvertTo-SqlEscapedLiteral -Value $ParsedMeasurement.NodeId
+        $target = ConvertTo-SqlEscapedLiteral -Value $ParsedMeasurement.Target
         $throughput = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.00}', $ParsedMeasurement.ThroughputMbit)
-        $tsNs = Escape-SqlLiteral -Value $ParsedMeasurement.TimestampNs
+        $tsNs = ConvertTo-SqlEscapedLiteral -Value $ParsedMeasurement.TimestampNs
         $measuredAtUtc = Convert-NodeTimestampToUtc -Timestamp $ParsedMeasurement.TimestampNs
     }
 
-    $measuredAtEsc = Escape-SqlLiteral -Value $measuredAtUtc
+    $measuredAtEsc = ConvertTo-SqlEscapedLiteral -Value $measuredAtUtc
 
-    $insertMeasurement = "INSERT INTO measurements (run_id, device_id, name, ip, domain, nodeid, target, throughput_mbit, measurement_timestamp_ns, measured_at_utc, raw_output, collected_at_utc) VALUES ('$((Escape-SqlLiteral -Value $RunId))', '$deviceId', '$name', '$ip', '$domain', '$nodeId', '$target', $throughput, '$tsNs', '$measuredAtEsc', '$rawEsc', '$nowUtc');"
+    $insertMeasurement = "INSERT INTO measurements (run_id, device_id, name, ip, domain, nodeid, target, throughput_mbit, measurement_timestamp_ns, measured_at_utc, raw_output, collected_at_utc) VALUES ('$((ConvertTo-SqlEscapedLiteral -Value $RunId))', '$deviceId', '$name', '$ip', '$domain', '$nodeId', '$target', $throughput, '$tsNs', '$measuredAtEsc', '$rawEsc', '$nowUtc');"
 
     Invoke-Sqlite -Config $Config -Sql $insertMeasurement | Out-Null
-    Log -Message "DB insert complete for node ${ip}"
+    Write-Log -Message "DB insert complete for node ${ip}"
 }
 
 function Complete-MeasurementRun {
@@ -215,15 +215,15 @@ function Complete-MeasurementRun {
     )
 
     $completedUtc = (Get-Date).ToUniversalTime().ToString('o')
-    $notesEsc = Escape-SqlLiteral -Value $Notes
+    $notesEsc = ConvertTo-SqlEscapedLiteral -Value $Notes
 
-    $sql = "UPDATE runs SET completed_at_utc = '$completedUtc', status = '$((Escape-SqlLiteral -Value $Status))', reachable_nodes = $ReachableNodes, collected_nodes = $CollectedNodes, parsed_nodes = $ParsedNodes, notes = '$notesEsc' WHERE run_id = '$((Escape-SqlLiteral -Value $RunId))';"
+    $sql = "UPDATE runs SET completed_at_utc = '$completedUtc', status = '$((ConvertTo-SqlEscapedLiteral -Value $Status))', reachable_nodes = $ReachableNodes, collected_nodes = $CollectedNodes, parsed_nodes = $ParsedNodes, notes = '$notesEsc' WHERE run_id = '$((ConvertTo-SqlEscapedLiteral -Value $RunId))';"
 
     Invoke-Sqlite -Config $Config -Sql $sql | Out-Null
-    Log -Message "Run completed: ${RunId}, status=${Status}, reachable=${ReachableNodes}, collected=${CollectedNodes}, parsed=${ParsedNodes}"
+    Write-Log -Message "Run completed: ${RunId}, status=${Status}, reachable=${ReachableNodes}, collected=${CollectedNodes}, parsed=${ParsedNodes}"
 }
 
-function Insert-NodeJobRecord {
+function Add-NodeJobRecord {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -241,7 +241,11 @@ function Insert-NodeJobRecord {
         [string]$ErrorMessage = ''
     )
 
-    $sql = "INSERT INTO node_jobs (run_id, device_id, name, ip, domain, status, triggered_at_utc, collected_at_utc, result_file, error_file, error_message) VALUES ('$((Escape-SqlLiteral -Value $RunId))', '$((Escape-SqlLiteral -Value $Node.DeviceID))', '$((Escape-SqlLiteral -Value $Node.Name))', '$((Escape-SqlLiteral -Value $Node.IP))', '$((Escape-SqlLiteral -Value $Node.Domain))', '$((Escape-SqlLiteral -Value $Status))', '$((Escape-SqlLiteral -Value $TriggeredAtUtc))', '$((Escape-SqlLiteral -Value $CollectedAtUtc))', '$((Escape-SqlLiteral -Value $ResultFile))', '$((Escape-SqlLiteral -Value $ErrorFile))', '$((Escape-SqlLiteral -Value $ErrorMessage))');"
+    $sql = "INSERT INTO node_jobs (run_id, device_id, name, ip, domain, status, triggered_at_utc, collected_at_utc, result_file, error_file, error_message) VALUES ('$((ConvertTo-SqlEscapedLiteral -Value $RunId))', '$((ConvertTo-SqlEscapedLiteral -Value $Node.DeviceID))', '$((ConvertTo-SqlEscapedLiteral -Value $Node.Name))', '$((ConvertTo-SqlEscapedLiteral -Value $Node.IP))', '$((ConvertTo-SqlEscapedLiteral -Value $Node.Domain))', '$((ConvertTo-SqlEscapedLiteral -Value $Status))', '$((ConvertTo-SqlEscapedLiteral -Value $TriggeredAtUtc))', '$((ConvertTo-SqlEscapedLiteral -Value $CollectedAtUtc))', '$((ConvertTo-SqlEscapedLiteral -Value $ResultFile))', '$((ConvertTo-SqlEscapedLiteral -Value $ErrorFile))', '$((ConvertTo-SqlEscapedLiteral -Value $ErrorMessage))');"
 
     Invoke-Sqlite -Config $Config -Sql $sql | Out-Null
 }
+
+
+
+

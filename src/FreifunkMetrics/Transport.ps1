@@ -341,7 +341,7 @@ function Convert-CollectStreamToFiles {
     return @($records.ToArray())
 }
 
-function Collect-NodeResults {
+function Receive-NodeResults {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -411,7 +411,7 @@ find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while
 
         Set-Content -Path $localPath -Value $trimmedRawOutput
 
-        $parsedMeasurement = Parse-MeasurementOutput -RawOutput $trimmedRawOutput
+        $parsedMeasurement = ConvertFrom-MeasurementOutput -RawOutput $trimmedRawOutput
         if ($null -eq $parsedMeasurement) {
             $pendingFiles += [pscustomobject]@{
                 RemotePath = $remotePath
@@ -495,7 +495,7 @@ function Invoke-NodeCollectBatch {
             [pscustomobject]@{
                 Index         = $item.Index
                 Node          = $item.Node
-                CollectResult = (Collect-NodeResults -Config $Config -Node $item.Node -RunId $RunId -RawDir $RawDir)
+                CollectResult = (Receive-NodeResults -Config $Config -Node $item.Node -RunId $RunId -RawDir $RawDir)
             }
         }
         return
@@ -518,7 +518,7 @@ function Invoke-NodeCollectBatch {
             Import-Module $modulePath -Force | Out-Null
 
             try {
-                $collectResult = Collect-NodeResults -Config $config -Node $item.Node -RunId $collectRunIdentifier -RawDir $rawDir
+                $collectResult = Receive-NodeResults -Config $config -Node $item.Node -RunId $collectRunIdentifier -RawDir $rawDir
             }
             catch {
                 $collectResult = [pscustomobject]@{
@@ -540,7 +540,7 @@ function Invoke-NodeCollectBatch {
         } -ThrottleLimit $throttle
 }
 
-function Parse-MeasurementOutput {
+function ConvertFrom-MeasurementOutput {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -589,3 +589,6 @@ function Parse-MeasurementOutput {
 
     return $null
 }
+
+
+
