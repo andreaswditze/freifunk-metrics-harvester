@@ -181,7 +181,8 @@ Describe 'Get-NodeTriggerCommandInfo' {
             SpeedtestTargetBytes = 123456789
         }
 
-        $info = Get-NodeTriggerCommandInfo -Config $config
+        $info = Get-NodeTriggerCommandInfo -Config $config -RunId 'run-trigger'
+        $info.RemoteResultFile | Should -Be '/tmp/harvester/run-trigger/*.txt'
 
         $info.TriggerCommand | Should -Match 'rand\(\)\*43'
         $info.TriggerCommand | Should -Match 'sleep "\$delay"'
@@ -217,9 +218,10 @@ Describe 'SSH streaming integration' -Tag 'ssh-streaming' {
 
         foreach ($node in $nodes) {
             $collectConfig = @{} + $config
-            $collectConfig.RemoteResultDir = ('{0}/pester-ssh-streaming-{1}' -f $config.RemoteResultDir.TrimEnd('/'), ([guid]::NewGuid().ToString('N')))
-            $remoteFile = ('{0}/result.txt' -f $collectConfig.RemoteResultDir)
-            $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $collectConfig.RemoteResultDir
+            $collectConfig.RemoteResultDir = ('{0}/pester-ssh-streaming-base-{1}' -f $config.RemoteResultDir.TrimEnd('/'), ([guid]::NewGuid().ToString('N')))
+            $remoteRunDir = Get-RemoteRunResultDir -Config $collectConfig -RunId 'run-ssh-streaming'
+            $remoteFile = ('{0}/result.txt' -f $remoteRunDir)
+            $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $remoteRunDir
             $remoteFileEscaped = Convert-ToShellSingleQuoted -Value $remoteFile
             $payload = 'speedtest,nodeid=pester download_mbit=12.34,target="https://example.invalid/test.bin" 1772839860'
             $payloadEscaped = Convert-ToShellSingleQuoted -Value $payload
@@ -477,6 +479,13 @@ Describe 'Receive-NodeResults' {
 }
 
 
+Describe 'Get-RemoteRunResultDir' {
+    It 'builds a run-specific remote directory' {
+        $config = @{ RemoteResultDir = '/tmp/harvester' }
+
+        Get-RemoteRunResultDir -Config $config -RunId 'run-20260307-123456' | Should -Be '/tmp/harvester/run-20260307-123456'
+    }
+}
 Describe 'Get-FinishedNodeResultCountBatch' {
     It 'counts nodes with finished remote result files' {
         $mockSsh = Join-Path $TestDrive 'mock-ssh-ready.ps1'
@@ -484,7 +493,7 @@ Describe 'Get-FinishedNodeResultCountBatch' {
             '$command = $args[-1]'
             '$nodeHost = $args[-2]'
             'if ($command -like ''find*'') {'
-            '    if ($nodeHost -like ''*::1'') { Write-Output ''/tmp/harvester/1700000001.txt'' }'
+            '    if ($nodeHost -like ''*::1'') { Write-Output ''/tmp/harvester/run-ready/1700000001.txt'' }'
             '    exit 0'
             '}'
             'Write-Output (''unexpected command: {0}'' -f $command)'
@@ -504,7 +513,7 @@ Describe 'Get-FinishedNodeResultCountBatch' {
             [pscustomobject]@{ DeviceID = 'node-002'; Name = 'Node 2'; IP = '2a03:2260::2'; Domain = 'dom-b' }
         )
 
-        Get-FinishedNodeResultCountBatch -Config $config -Nodes $nodes | Should -Be 1
+        Get-FinishedNodeResultCountBatch -Config $config -RunId 'run-ready' -Nodes $nodes | Should -Be 1
     }
 }
 
@@ -558,8 +567,3 @@ Describe 'Invoke-NodeCollectBatch' {
         @($sorted[1].CollectResult.Files).Count | Should -Be 1
     }
 }
-
-
-
-
-

@@ -84,6 +84,7 @@ function Wait-WithProgress {
         [int]$Seconds,
         [string]$Activity = 'Waiting before collect phase',
         [hashtable]$Config = @{},
+        [string]$RunId = '',
         [object[]]$Nodes = @(),
         [int]$PollIntervalSeconds = 15
     )
@@ -102,7 +103,7 @@ function Wait-WithProgress {
 
         if ($nodeCount -gt 0 -and (($elapsed -eq 0) -or (($elapsed % $pollInterval) -eq 0))) {
             try {
-                $finishedCount = Get-FinishedNodeResultCountBatch -Config $Config -Nodes $Nodes
+                $finishedCount = Get-FinishedNodeResultCountBatch -Config $Config -RunId $RunId -Nodes $Nodes
             }
             catch {
                 $finishedCount = -1
@@ -208,6 +209,3 @@ function Convert-NodeTimestampToUtc {
         return ''
     }
 }
-
-
-

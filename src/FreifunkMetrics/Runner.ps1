@@ -108,7 +108,7 @@ function Invoke-CollectNodeMetricsMain {
         $waitSeconds = [Math]::Max(0, [int]$config.TriggerRandomDelayMaxSeconds) * 2
         if ($waitSeconds -gt 0) {
             Write-Log -Message "Waiting $waitSeconds seconds before collect phase"
-            Wait-WithProgress -Seconds $waitSeconds -Activity 'Waiting for randomized download starts' -Config $config -Nodes @($triggeredNodes.ToArray())
+            Wait-WithProgress -Seconds $waitSeconds -Activity 'Waiting for randomized download starts' -Config $config -RunId $RunId -Nodes @($triggeredNodes.ToArray())
         }
 
         $collectedCount = 0
@@ -210,5 +210,3 @@ function Invoke-CollectNodeMetricsMain {
         exit 1
     }
 }
-
-

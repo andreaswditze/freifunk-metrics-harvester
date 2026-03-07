@@ -34,17 +34,43 @@ function New-SshArgs {
     )
 }
 
+function Get-RemoteRunResultDir {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$RunId
+    )
+
+    $baseDir = (Convert-ToTrimmedString -Value $Config.RemoteResultDir).TrimEnd('/')
+    $safeRunId = Get-SafeFileNamePart -Value $RunId
+
+    if ([string]::IsNullOrWhiteSpace($baseDir)) {
+        throw 'Config value RemoteResultDir must not be empty.'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($safeRunId)) {
+        throw 'RunId must not be empty.'
+    }
+
+    return "$baseDir/$safeRunId"
+}
+
 function Test-NodeResultFinished {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [hashtable]$Config,
         [Parameter(Mandatory = $true)]
+        [string]$RunId,
+        [Parameter(Mandatory = $true)]
         [object]$Node
     )
 
     $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
-    $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $Config.RemoteResultDir
+    $remoteRunDir = Get-RemoteRunResultDir -Config $Config -RunId $RunId
+    $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $remoteRunDir
     $probeCmd = @"
 find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while IFS= read -r file; do
     if grep -Eq '^(speedtest,nodeid=|wget_failed,nodeid=|speedtest_invalid,nodeid=|speedtest_size_mismatch,nodeid=)' "`$file"; then
@@ -69,6 +95,8 @@ function Get-FinishedNodeResultCountBatch {
         [Parameter(Mandatory = $true)]
         [hashtable]$Config,
         [Parameter(Mandatory = $true)]
+        [string]$RunId,
+        [Parameter(Mandatory = $true)]
         [object[]]$Nodes
     )
 
@@ -85,19 +113,21 @@ function Get-FinishedNodeResultCountBatch {
 
     $parallelism = [Math]::Max(1, [int]([Math]::Min([Math]::Max(1, [int]$Config.CollectParallelism), $indexedNodes.Count)))
     if ($parallelism -le 1 -or $indexedNodes.Count -le 1) {
-        return @($indexedNodes | Where-Object { Test-NodeResultFinished -Config $Config -Node $_.Node }).Count
+        return @($indexedNodes | Where-Object { Test-NodeResultFinished -Config $Config -RunId $RunId -Node $_.Node }).Count
     }
 
     $batchConfig = $Config
+    $batchRunId = $RunId
     $modulePath = $script:ModuleFilePath
     $ready = @(
         $indexedNodes |
             ForEach-Object -Parallel {
                 $item = $_
                 $config = $using:batchConfig
+                $runId = $using:batchRunId
                 $modulePath = $using:modulePath
                 Import-Module $modulePath -Force | Out-Null
-                if (Test-NodeResultFinished -Config $config -Node $item.Node) {
+                if (Test-NodeResultFinished -Config $config -RunId $runId -Node $item.Node) {
                     $item.Index
                 }
             } -ThrottleLimit $parallelism
@@ -110,10 +140,13 @@ function Get-NodeTriggerCommandInfo {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [hashtable]$Config
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$RunId
     )
 
-    $remoteResultPattern = "$($Config.RemoteResultDir)/*.txt"
+    $remoteRunDir = Get-RemoteRunResultDir -Config $Config -RunId $RunId
+    $remoteResultPattern = "$remoteRunDir/*.txt"
 
     $delayMaxSeconds = [Math]::Max(0, [int]$Config.TriggerRandomDelayMaxSeconds)
     $delayUpperBound = $delayMaxSeconds + 1
@@ -151,7 +184,7 @@ awk -v nodeid="`$nodeid" -v start="`$start" -v t0="`$t0" -v t1="`$t1" -v target=
     printf "speedtest,nodeid=%s download_mbit=%.2f,target=\"%s\" %s\n",nodeid,(bytes*8)/(sec*1000000),target,start
 }'
 "@
-    $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $Config.RemoteResultDir
+    $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $remoteRunDir
     $triggerCmd = "mkdir -p '$remoteDirEscaped'; ts=`$(date +%s%N); out='$remoteDirEscaped/'`$ts.txt; ( $payload ) > `"`$out`" 2>&1 &"
 
     return [pscustomobject]@{
@@ -172,7 +205,7 @@ function Invoke-NodeTriggerCommand {
         [string]$RunId
     )
 
-    $triggerInfo = Get-NodeTriggerCommandInfo -Config $Config
+    $triggerInfo = Get-NodeTriggerCommandInfo -Config $Config -RunId $RunId
     $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
     $output = & $Config.SshBinary @sshArgs $triggerInfo.TriggerCommand 2>&1
     $exitCode = $LASTEXITCODE
@@ -230,7 +263,7 @@ function Invoke-NodeTriggerBatch {
         return
     }
 
-    $triggerInfo = Get-NodeTriggerCommandInfo -Config $Config
+    $triggerInfo = Get-NodeTriggerCommandInfo -Config $Config -RunId $RunId
     $sshHostKeyArgs = Get-SshHostKeyArgs
     $throttle = [Math]::Min($parallelism, $indexedNodes.Count)
 
@@ -355,7 +388,8 @@ function Receive-NodeResults {
     )
 
     $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
-    $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $Config.RemoteResultDir
+    $remoteRunDir = Get-RemoteRunResultDir -Config $Config -RunId $RunId
+    $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $remoteRunDir
     $markers = Get-CollectStreamMarkers
     $beginPrefixEscaped = Convert-ToShellSingleQuoted -Value $markers.BeginPrefix
     $endPrefixEscaped = Convert-ToShellSingleQuoted -Value $markers.EndPrefix
@@ -437,6 +471,14 @@ find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while
         $deleteExit = $LASTEXITCODE
         if ($deleteExit -ne 0) {
             $downloadErrors += ('delete failed for ' + (@($downloaded | ForEach-Object { $_.RemotePath }) -join ', ') + ': ' + ($deleteOutput -join ' '))
+        }
+    }
+
+    if ($downloaded.Count -gt 0 -and $pendingFiles.Count -eq 0) {
+        $cleanupCmd = "rmdir '$remoteDirEscaped' >/dev/null 2>&1 || true"
+        $cleanupOutput = & $Config.SshBinary @sshArgs $cleanupCmd 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $downloadErrors += ('remote run dir cleanup failed for ' + $remoteRunDir + ': ' + ($cleanupOutput -join ' '))
         }
     }
 
@@ -589,6 +631,3 @@ function ConvertFrom-MeasurementOutput {
 
     return $null
 }
-
-
-
