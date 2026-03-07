@@ -740,6 +740,15 @@ CREATE TABLE IF NOT EXISTS measurements (
     raw_output TEXT NOT NULL,
     collected_at_utc TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_nodes_last_seen_utc ON nodes(last_seen_utc);
+CREATE INDEX IF NOT EXISTS idx_node_jobs_run_id ON node_jobs(run_id);
+CREATE INDEX IF NOT EXISTS idx_node_jobs_run_status ON node_jobs(run_id, status);
+CREATE INDEX IF NOT EXISTS idx_measurements_run_id ON measurements(run_id);
+CREATE INDEX IF NOT EXISTS idx_measurements_device_id ON measurements(device_id);
+CREATE INDEX IF NOT EXISTS idx_measurements_nodeid ON measurements(nodeid);
+CREATE INDEX IF NOT EXISTS idx_measurements_run_device_id ON measurements(run_id, device_id);
+CREATE INDEX IF NOT EXISTS idx_measurements_measured_at_utc ON measurements(measured_at_utc);
 "@
 
     Invoke-Sqlite -Config $Config -Sql $ddl | Out-Null

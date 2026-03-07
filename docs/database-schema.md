@@ -2,7 +2,9 @@
 
 The harvester creates and uses one SQLite database (default: `data/metrics.db`).
 
-## Table: nodes
+## Tables
+
+### `nodes`
 Tracks known nodes over time.
 
 - `id` INTEGER PK
@@ -14,7 +16,7 @@ Tracks known nodes over time.
 - `last_seen_utc` TEXT (ISO 8601)
 - UNIQUE(`device_id`, `ip`)
 
-## Table: runs
+### `runs`
 One row per script execution run.
 
 - `run_id` TEXT PK
@@ -28,8 +30,8 @@ One row per script execution run.
 - `parsed_nodes` INTEGER
 - `notes` TEXT
 
-## Table: node_jobs
-Detailed per-node trigger/collect state tracking.
+### `node_jobs`
+Detailed per-node trigger and collect state tracking.
 
 - `id` INTEGER PK
 - `run_id` TEXT
@@ -37,14 +39,14 @@ Detailed per-node trigger/collect state tracking.
 - `name` TEXT
 - `ip` TEXT
 - `domain` TEXT
-- `status` TEXT (for example `triggered`, `trigger_failed`, `collected`)
+- `status` TEXT (for example `triggered`, `trigger_failed`, `collected`, `collect_pending`)
 - `triggered_at_utc` TEXT
 - `collected_at_utc` TEXT
 - `result_file` TEXT
 - `error_file` TEXT
 - `error_message` TEXT
 
-## Table: measurements
+### `measurements`
 Final stored measurements with raw payload.
 
 - `id` INTEGER PK
@@ -53,14 +55,27 @@ Final stored measurements with raw payload.
 - `name` TEXT
 - `ip` TEXT
 - `domain` TEXT
-- `nodeid` TEXT (from Gluon primary mac)
+- `nodeid` TEXT
 - `target` TEXT
-- `throughput_mbit` REAL (`download_mbit`)
-- `measurement_timestamp_ns` TEXT (node timestamp from payload)
-- `measured_at_utc` TEXT (derived UTC timestamp)
-- `raw_output` TEXT (full original line)
+- `throughput_mbit` REAL
+- `measurement_timestamp_ns` TEXT
+- `measured_at_utc` TEXT
+- `raw_output` TEXT
 - `collected_at_utc` TEXT
 
+## Indexes
+The schema also creates operational indexes for the main query paths:
+
+- `idx_nodes_last_seen_utc` on `nodes(last_seen_utc)`
+- `idx_node_jobs_run_id` on `node_jobs(run_id)`
+- `idx_node_jobs_run_status` on `node_jobs(run_id, status)`
+- `idx_measurements_run_id` on `measurements(run_id)`
+- `idx_measurements_device_id` on `measurements(device_id)`
+- `idx_measurements_nodeid` on `measurements(nodeid)`
+- `idx_measurements_run_device_id` on `measurements(run_id, device_id)`
+- `idx_measurements_measured_at_utc` on `measurements(measured_at_utc)`
+
 ## Notes
-- Raw files are also kept in `data/raw/<run_id>/`.
-- Schema is initialized automatically by `collect-node-metrics.ps1`.
+- Raw files are also stored in `data/raw/<run_id>/`.
+- Schema initialization runs automatically inside `collect-node-metrics.ps1`.
+- WAL mode is enabled for the database.
