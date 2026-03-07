@@ -142,14 +142,20 @@ Describe 'Import-NodeListFromExcel' {
     }
 }
 Describe 'Get-NodeTriggerCommandInfo' {
-    It 'adds a randomized startup delay before the download' {
-        $config = @{ RemoteResultDir = '/tmp/harvester' }
+    It 'uses configurable delay and target settings' {
+        $config = @{
+            RemoteResultDir = '/tmp/harvester'
+            TriggerRandomDelayMaxSeconds = 42
+            SpeedtestTargetUrl = 'https://example.invalid/testfile.bin'
+            SpeedtestTargetBytes = 123456789
+        }
 
         $info = Get-NodeTriggerCommandInfo -Config $config
 
-        $info.TriggerCommand | Should -Match 'rand\(\)\*601'
+        $info.TriggerCommand | Should -Match 'rand\(\)\*43'
         $info.TriggerCommand | Should -Match 'sleep "\$delay"'
-        $info.TriggerCommand | Should -Match 'wget -O /dev/null -q https://fsn1-speed\.hetzner\.com/100MB\.bin'
+        $info.TriggerCommand | Should -Match 'target_url=''https://example\.invalid/testfile\.bin'''
+        $info.TriggerCommand | Should -Match 'bytes=123456789'
     }
 }
 

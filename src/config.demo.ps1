@@ -17,6 +17,9 @@ return @{
     RemoteResultDir          = '/tmp/harvester'
     SshConnectTimeoutSeconds = 8
     TriggerParallelism       = 10
+    TriggerRandomDelayMaxSeconds = 600
+    SpeedtestTargetUrl         = 'https://fsn1-speed.hetzner.com/100MB.bin'
+    SpeedtestTargetBytes       = 104857600
     CollectWaitSeconds       = 90
     LogFilePrefix            = 'collect-node-metrics'
 
