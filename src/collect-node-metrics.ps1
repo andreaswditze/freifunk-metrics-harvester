@@ -100,6 +100,34 @@ function Convert-ToTrimmedString {
 
     return ([string]$Value).Trim()
 }
+function Convert-ToShellSingleQuoted {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [string]$Value
+    )
+
+    if ($null -eq $Value) {
+        return ''
+    }
+
+    return $Value.Replace("'", "'\''")
+}
+
+function Get-SafeFileNamePart {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [string]$Value
+    )
+
+    $trimmed = Convert-ToTrimmedString -Value $Value
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        return 'unknown'
+    }
+
+    return ($trimmed -replace '[^0-9A-Za-z._-]', '_')
+}
 function Convert-NodeTimestampToUtc {
     [CmdletBinding()]
     param(
@@ -595,15 +623,13 @@ function Invoke-NodeTriggerCommand {
         [Parameter(Mandatory = $true)]
         [string]$RunId
     )
-
-    $remoteResultFile = "$($Config.RemoteResultDir)/${RunId}.result"
-    $remoteErrorFile = "$($Config.RemoteResultDir)/${RunId}.error"
+    $remoteResultPattern = "$($Config.RemoteResultDir)/*.txt"
 
     $payload = @'
 start=$(date +%s%N); nodeid=$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac); t0=$(date +%s.%N); wget -O /dev/null -q https://fsn1-speed.hetzner.com/100MB.bin; t1=$(date +%s.%N); awk -v nodeid="$nodeid" -v start="$start" -v t0="$t0" -v t1="$t1" 'BEGIN{bytes=104857600; target="https://fsn1-speed.hetzner.com/100MB.bin"; sec=t1-t0; printf "speedtest,nodeid=%s download_mbit=%.2f,target=\"%s\" %s\n",nodeid,(bytes*8)/(sec*1000000),target,start}'
 '@
-    $payloadEscaped = $payload.Replace("'", "'\''")
-    $triggerCmd = "mkdir -p '$($Config.RemoteResultDir)'; ( sh -lc '$payloadEscaped' ) > '$remoteResultFile' 2> '$remoteErrorFile' &"
+    $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $Config.RemoteResultDir
+    $triggerCmd = "mkdir -p '$remoteDirEscaped'; ts=`$(date +%s%N); out='$remoteDirEscaped/'`$ts.txt; ( $payload ) > `"`$out`" 2>&1 &"
 
     $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
     $output = & $Config.SshBinary @sshArgs $triggerCmd 2>&1
@@ -613,8 +639,8 @@ start=$(date +%s%N); nodeid=$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac);
         return [pscustomobject]@{
             Reachable        = $false
             Triggered        = $false
-            RemoteResultFile = $remoteResultFile
-            RemoteErrorFile  = $remoteErrorFile
+            RemoteResultFile = $remoteResultPattern
+            RemoteErrorFile  = ''
             Error            = ($output -join ' ')
         }
     }
@@ -622,8 +648,8 @@ start=$(date +%s%N); nodeid=$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac);
     return [pscustomobject]@{
         Reachable        = $true
         Triggered        = $true
-        RemoteResultFile = $remoteResultFile
-        RemoteErrorFile  = $remoteErrorFile
+        RemoteResultFile = $remoteResultPattern
+        RemoteErrorFile  = ''
         Error            = ''
     }
 }
@@ -641,64 +667,95 @@ function Collect-NodeResults {
         [string]$RawDir
     )
 
-    $resultFileName = "{0}_{1}.result" -f $Node.DeviceID, $Node.IP.Replace(':', '_')
-    $errorFileName = "{0}_{1}.error" -f $Node.DeviceID, $Node.IP.Replace(':', '_')
-    $localResultPath = Join-Path $RawDir $resultFileName
-    $localErrorPath = Join-Path $RawDir $errorFileName
+    $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
+    $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $Config.RemoteResultDir
+    $listCmd = "find '$remoteDirEscaped' -maxdepth 1 -type f -print | sort"
 
-    $remoteResultPath = "$($Config.RemoteResultDir)/${RunId}.result"
-    $remoteErrorPath = "$($Config.RemoteResultDir)/${RunId}.error"
+    $listOutput = & $Config.SshBinary @sshArgs $listCmd 2>&1
+    $listExit = $LASTEXITCODE
 
-    $scpCommon = @(
-        '-i', $Config.SshKeyPath,
-        '-o', 'BatchMode=yes',
-        '-o', "ConnectTimeout=$($Config.SshConnectTimeoutSeconds)",
-        '-o', 'StrictHostKeyChecking=accept-new'
+    if ($listExit -ne 0) {
+        return [pscustomobject]@{
+            Success         = $false
+            LocalResultPath = ''
+            LocalErrorPath  = ''
+            RawOutput       = ''
+            ErrorOutput     = ($listOutput -join ' ')
+            Files           = @()
+        }
+    }
+
+    $remoteFiles = @(
+        $listOutput |
+            ForEach-Object { Convert-ToTrimmedString -Value $_ } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     )
 
-    $scpResult = & $Config.ScpBinary @scpCommon "$($Config.SshUser)@$($Node.IP):$remoteResultPath" $localResultPath 2>&1
-    $resultExit = $LASTEXITCODE
+    if ($remoteFiles.Count -eq 0) {
+        return [pscustomobject]@{
+            Success         = $true
+            LocalResultPath = ''
+            LocalErrorPath  = ''
+            RawOutput       = ''
+            ErrorOutput     = ''
+            Files           = @()
+        }
+    }
 
-    if ($resultExit -ne 0) {
-        $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
-        $catOutput = & $Config.SshBinary @sshArgs "cat '$remoteResultPath'" 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            return [pscustomobject]@{
-                Success         = $false
-                LocalResultPath = $localResultPath
-                LocalErrorPath  = $localErrorPath
-                RawOutput       = ''
-                ErrorOutput     = ($scpResult -join ' ') + ' | ' + ($catOutput -join ' ')
-            }
+    $safeIp = Get-SafeFileNamePart -Value $Node.IP
+    $downloaded = New-Object System.Collections.Generic.List[object]
+    $downloadErrors = New-Object System.Collections.Generic.List[string]
+
+    foreach ($remoteFile in $remoteFiles) {
+        $remoteFileEscaped = Convert-ToShellSingleQuoted -Value $remoteFile
+        $remoteLeaf = Split-Path -Path $remoteFile -Leaf
+        $safeLeaf = Get-SafeFileNamePart -Value $remoteLeaf
+        $localPath = Join-Path $RawDir ("{0}_{1}_{2}" -f $Node.DeviceID, $safeIp, $safeLeaf)
+
+        $catOutput = & $Config.SshBinary @sshArgs "cat '$remoteFileEscaped'" 2>&1
+        $catExit = $LASTEXITCODE
+
+        if ($catExit -ne 0) {
+            $downloadErrors.Add(("cat failed for {0}: {1}" -f $remoteFile, ($catOutput -join ' ')))
+            continue
         }
 
-        Set-Content -Path $localResultPath -Value ($catOutput -join "`n") -NoNewline
+        Set-Content -Path $localPath -Value ($catOutput -join "`n") -NoNewline
+
+        $rawOutput = ''
+        if (Test-Path -Path $localPath -PathType Leaf) {
+            $rawOutput = Get-Content -Path $localPath -Raw
+        }
+
+        $downloaded.Add([pscustomobject]@{
+            RemotePath = $remoteFile
+            LocalPath  = $localPath
+            RawOutput  = Convert-ToTrimmedString -Value $rawOutput
+        })
     }
 
-    $null = & $Config.ScpBinary @scpCommon "$($Config.SshUser)@$($Node.IP):$remoteErrorPath" $localErrorPath 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Set-Content -Path $localErrorPath -Value '' -NoNewline
+    if ($downloaded.Count -eq 0) {
+        return [pscustomobject]@{
+            Success         = $false
+            LocalResultPath = ''
+            LocalErrorPath  = ''
+            RawOutput       = ''
+            ErrorOutput     = ($downloadErrors.ToArray() -join ' | ')
+            Files           = @()
+        }
     }
 
-    $rawOutput = ''
-    if (Test-Path -Path $localResultPath -PathType Leaf) {
-        $rawOutput = (Get-Content -Path $localResultPath -Raw)
-    }
-
-    $errorOutput = ''
-    if (Test-Path -Path $localErrorPath -PathType Leaf) {
-        $errorOutput = (Get-Content -Path $localErrorPath -Raw)
-    }
+    $firstFile = $downloaded[0]
 
     return [pscustomobject]@{
         Success         = $true
-        LocalResultPath = $localResultPath
-        LocalErrorPath  = $localErrorPath
-        RawOutput       = Convert-ToTrimmedString -Value $rawOutput
-        ErrorOutput     = Convert-ToTrimmedString -Value $errorOutput
+        LocalResultPath = $firstFile.LocalPath
+        LocalErrorPath  = ''
+        RawOutput       = $firstFile.RawOutput
+        ErrorOutput     = ($downloadErrors.ToArray() -join ' | ')
+        Files           = @($downloaded)
     }
 }
-
 function Parse-MeasurementOutput {
     [CmdletBinding()]
     param(
@@ -712,25 +769,30 @@ function Parse-MeasurementOutput {
         return $null
     }
 
-    $line = ($RawOutput -split "`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
-    if (-not $line) {
-        return $null
-    }
-
     $regex = '^speedtest,nodeid=(?<nodeid>[^ ]+)\s+download_mbit=(?<download>[0-9]+(?:\.[0-9]+)?),target="(?<target>[^"]+)"\s+(?<timestamp>[0-9]+)$'
-    $match = [regex]::Match($line.Trim(), $regex)
-    if (-not $match.Success) {
-        return $null
+
+    $lines = @(
+        $RawOutput -split '\r?\n' |
+            ForEach-Object { Convert-ToTrimmedString -Value $_ } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+
+    foreach ($line in $lines) {
+        $match = [regex]::Match($line, $regex)
+        if (-not $match.Success) {
+            continue
+        }
+
+        return [pscustomobject]@{
+            NodeId         = $match.Groups['nodeid'].Value
+            ThroughputMbit = [double]::Parse($match.Groups['download'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
+            Target         = $match.Groups['target'].Value
+            TimestampNs    = $match.Groups['timestamp'].Value
+        }
     }
 
-    return [pscustomobject]@{
-        NodeId         = $match.Groups['nodeid'].Value
-        ThroughputMbit = [double]::Parse($match.Groups['download'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
-        Target         = $match.Groups['target'].Value
-        TimestampNs    = $match.Groups['timestamp'].Value
-    }
+    return $null
 }
-
 function Save-Measurement {
     [CmdletBinding()]
     param(
@@ -914,6 +976,7 @@ try {
     }
 
     $collectedCount = 0
+    $collectedFileCount = 0
     $parsedCount = 0
 
     Log -Message "Collect phase start, nodes=$($triggeredNodes.Count)"
@@ -930,22 +993,36 @@ try {
                 continue
             }
 
+            $collectedFiles = @($collect.Files)
+            if ($collectedFiles.Count -eq 0) {
+                $emptyMessage = 'no files found in remote harvester dir'
+                Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collected_empty' -CollectedAtUtc $collectedAtUtc -ErrorMessage $emptyMessage
+                Log -Level WARN -Message "Node collect empty: $($node.IP) - $emptyMessage"
+                Log-NodeAction -Node $node -Action 'collect_empty' -Detail $emptyMessage -Level WARN
+                continue
+            }
+
             $collectedCount++
-            Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collected' -CollectedAtUtc $collectedAtUtc -ResultFile $collect.LocalResultPath -ErrorFile $collect.LocalErrorPath -ErrorMessage $collect.ErrorOutput
-            Log-NodeAction -Node $node -Action 'collect_success' -Detail ('result_file=' + $collect.LocalResultPath)
+            $collectedFileCount += $collectedFiles.Count
 
-            $parsed = Parse-MeasurementOutput -RawOutput $collect.RawOutput
-            if ($parsed) {
-                $parsedCount++
-                Log -Message "Parse success: ip=$($node.IP), nodeid=$($parsed.NodeId), throughput_mbit=$($parsed.ThroughputMbit)"
-                Log-NodeAction -Node $node -Action 'parse_success' -Detail ('nodeid=' + $parsed.NodeId + '; throughput_mbit=' + $parsed.ThroughputMbit)
-            }
-            else {
-                Log -Level WARN -Message "Parse failed for node $($node.IP), raw stored"
-                Log-NodeAction -Node $node -Action 'parse_failed' -Detail 'raw output stored, parser did not match' -Level WARN
-            }
+            $resultFiles = (@($collectedFiles | ForEach-Object { $_.LocalPath }) -join ';')
+            Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collected' -CollectedAtUtc $collectedAtUtc -ResultFile $resultFiles -ErrorFile '' -ErrorMessage $collect.ErrorOutput
+            Log-NodeAction -Node $node -Action 'collect_success' -Detail ('files=' + $collectedFiles.Count + '; first_file=' + $collectedFiles[0].LocalPath)
 
-            Save-Measurement -Config $config -Node $node -RunId $RunId -RawOutput $collect.RawOutput -ParsedMeasurement $parsed
+            foreach ($file in $collectedFiles) {
+                $parsed = Parse-MeasurementOutput -RawOutput $file.RawOutput
+                if ($parsed) {
+                    $parsedCount++
+                    Log -Message "Parse success: ip=$($node.IP), nodeid=$($parsed.NodeId), throughput_mbit=$($parsed.ThroughputMbit), source_file=$($file.LocalPath)"
+                    Log-NodeAction -Node $node -Action 'parse_success' -Detail ('nodeid=' + $parsed.NodeId + '; throughput_mbit=' + $parsed.ThroughputMbit + '; source_file=' + $file.LocalPath)
+                }
+                else {
+                    Log -Level WARN -Message "Parse failed for node $($node.IP), source_file=$($file.LocalPath), raw stored"
+                    Log-NodeAction -Node $node -Action 'parse_failed' -Detail ('raw output stored, parser did not match; source_file=' + $file.LocalPath) -Level WARN
+                }
+
+                Save-Measurement -Config $config -Node $node -RunId $RunId -RawOutput $file.RawOutput -ParsedMeasurement $parsed
+            }
         }
         catch {
             Insert-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_exception' -CollectedAtUtc ((Get-Date).ToUniversalTime().ToString('o')) -ErrorMessage $_.Exception.Message
@@ -955,7 +1032,7 @@ try {
     }
 
     Complete-MeasurementRun -Config $config -RunId $RunId -ReachableNodes $reachableCount -CollectedNodes $collectedCount -ParsedNodes $parsedCount -Status 'completed'
-    Log -Message "Run summary: total=$($nodes.Count), reachable=$reachableCount, collected=$collectedCount, parsed=$parsedCount"
+    Log -Message "Run summary: total=$($nodes.Count), reachable=$reachableCount, collected_nodes=$collectedCount, collected_files=$collectedFileCount, parsed=$parsedCount"
 }
 catch {
     if ($script:CurrentConfig -and $RunId) {

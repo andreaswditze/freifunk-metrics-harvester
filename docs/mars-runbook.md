@@ -81,6 +81,11 @@ Optional explicit config:
 pwsh ./src/collect-node-metrics.ps1 -ConfigPath ./src/config.production.ps1
 ```
 
+
+Result file behavior on nodes:
+- Trigger writes to `/tmp/harvester/<timestamp>.txt`.
+- Collect phase downloads all files from `/tmp/harvester` for each reachable node.
+- Parser scans each downloaded file and uses the first matching `speedtest,nodeid=...` line.
 ## 6. Verify results
 
 - DB: `/home/ffuser/skripte/freifunk-metrics-harvester/data/metrics.db`

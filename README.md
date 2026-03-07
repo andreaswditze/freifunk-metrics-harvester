@@ -84,3 +84,8 @@ pwsh ./tests/Invoke-Tests.ps1
 
 ## License
 MIT License
+
+## Node result files
+- On each node, the measurement output is written as `/tmp/harvester/<timestamp>.txt`.
+- In collect phase, all files in `/tmp/harvester` are downloaded for the node.
+- Parser extracts the first matching `speedtest,nodeid=...` line from each file.

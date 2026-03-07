@@ -14,6 +14,20 @@ Describe 'Parse-MeasurementOutput' {
         $parsed.TimestampNs | Should -Be '1731000000000000000'
     }
 
+
+    It 'parses valid line protocol when banner text is present' {
+        $raw = @(
+            'Freifunk Nordhessen e.V.'
+            'Hostname: Test-Node'
+            'speedtest,nodeid=aabbccddeeff download_mbit=10.75,target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+        ) -join "`n"
+        $parsed = Parse-MeasurementOutput -RawOutput $raw
+
+        $parsed | Should -Not -BeNullOrEmpty
+        $parsed.NodeId | Should -Be 'aabbccddeeff'
+        $parsed.ThroughputMbit | Should -Be 10.75
+        $parsed.TimestampNs | Should -Be '1772839860'
+    }
     It 'returns null for invalid payload' {
         $parsed = Parse-MeasurementOutput -RawOutput 'invalid payload'
         $parsed | Should -BeNullOrEmpty
