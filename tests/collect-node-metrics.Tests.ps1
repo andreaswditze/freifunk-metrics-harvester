@@ -162,7 +162,7 @@ Describe 'Get-NodeTriggerCommandInfo' {
         $info.TriggerCommand | Should -Match 'target_url=''https://example\.invalid/testfile\.bin'''
         $info.TriggerCommand | Should -Match 'wget_exit_file='
         $info.TriggerCommand | Should -Match 'wc -c'
-        $info.TriggerCommand | Should -Match 'expected_bytes=123456789'
+        $info.TriggerCommand | Should -Match 'expected_bytes="?123456789"?'
     }
 }
 
