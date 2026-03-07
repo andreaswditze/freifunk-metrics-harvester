@@ -628,6 +628,20 @@ function Start-MeasurementRun {
     }
 }
 
+function Get-SshHostKeyArgs {
+    [CmdletBinding()]
+    param()
+
+    $nullDevice = if ($IsWindows) { 'NUL' } else { '/dev/null' }
+
+    return @(
+        '-o', 'StrictHostKeyChecking=no',
+        '-o', "UserKnownHostsFile=$nullDevice",
+        '-o', "GlobalKnownHostsFile=$nullDevice",
+        '-o', 'LogLevel=ERROR'
+    )
+}
+
 function New-SshArgs {
     [CmdletBinding()]
     param(
@@ -640,8 +654,8 @@ function New-SshArgs {
     return @(
         '-i', $Config.SshKeyPath,
         '-o', 'BatchMode=yes',
-        '-o', "ConnectTimeout=$($Config.SshConnectTimeoutSeconds)",
-        '-o', 'StrictHostKeyChecking=accept-new',
+        '-o', "ConnectTimeout=$($Config.SshConnectTimeoutSeconds)"
+    ) + (Get-SshHostKeyArgs) + @(
         "$($Config.SshUser)@${NodeIp}"
     )
 }
@@ -740,6 +754,7 @@ function Invoke-NodeTriggerBatch {
     }
 
     $triggerInfo = Get-NodeTriggerCommandInfo -Config $Config
+    $sshHostKeyArgs = Get-SshHostKeyArgs
     $throttle = [Math]::Min($parallelism, $indexedNodes.Count)
 
     return @(
@@ -750,11 +765,12 @@ function Invoke-NodeTriggerBatch {
                 $config = $using:Config
                 $triggerInfo = $using:triggerInfo
 
+                $sshHostKeyArgs = $using:sshHostKeyArgs
                 $sshArgs = @(
                     '-i', $config.SshKeyPath,
                     '-o', 'BatchMode=yes',
-                    '-o', "ConnectTimeout=$($config.SshConnectTimeoutSeconds)",
-                    '-o', 'StrictHostKeyChecking=accept-new',
+                    '-o', "ConnectTimeout=$($config.SshConnectTimeoutSeconds)"
+                ) + $sshHostKeyArgs + @(
                     "$($config.SshUser)@$($node.IP)"
                 )
 
