@@ -90,9 +90,24 @@ Node action log includes events such as:
 - `parse_success`, `parse_failed`
 
 ## Tests
-Run all Pester tests from repo root:
+Run the default Pester suite from repo root. This now also includes the SSH streaming test against configured `TestNodeIPs`:
 ```bash
 pwsh ./Invoke-Tests.ps1
+```
+
+Include the additional tagged integration tests:
+```bash
+pwsh ./Invoke-Tests.ps1 -IncludeIntegration
+```
+
+Run only the SSH streaming test against configured `TestNodeIPs`:
+```bash
+pwsh ./Invoke-Tests.ps1 -RunSshStreaming
+```
+
+Use a specific config file for tests that require `TestNodeIPs`:
+```bash
+pwsh ./Invoke-Tests.ps1 -ConfigPath ./src/config.production.ps1
 ```
 
 Alternative direct runner:
@@ -111,4 +126,6 @@ pwsh ./tests/Invoke-Tests.ps1
 
 ## License
 MIT License
+
+
 

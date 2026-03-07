@@ -3,7 +3,10 @@ param(
     [ValidateSet('None', 'NUnitXml', 'JUnitXml')]
     [string]$OutputFormat = 'None',
     [string]$OutputPath = '',
-    [switch]$InstallModules
+    [switch]$InstallModules,
+    [switch]$IncludeIntegration,
+    [switch]$RunSshStreaming,
+    [string]$ConfigPath = ''
 )
 
 Set-StrictMode -Version Latest
@@ -13,6 +16,9 @@ $params = @{
     OutputFormat = $OutputFormat
     OutputPath = $OutputPath
     InstallModules = $InstallModules
+    IncludeIntegration = $IncludeIntegration
+    RunSshStreaming = $RunSshStreaming
+    ConfigPath = $ConfigPath
 }
 
 & (Join-Path $PSScriptRoot 'tests/Invoke-Tests.ps1') @params

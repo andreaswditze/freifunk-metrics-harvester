@@ -1,5 +1,24 @@
 BeforeAll {
-    . "$PSScriptRoot/../src/collect-node-metrics.ps1" -NoRun
+    Remove-Module FreifunkMetrics -ErrorAction SilentlyContinue
+    Import-Module "$PSScriptRoot/../src/FreifunkMetrics.psm1" -Force
+}
+
+AfterAll {
+    Remove-Module FreifunkMetrics -ErrorAction SilentlyContinue
+}
+
+Describe 'Module entry points' {
+    It 'exports collector functions from the module' {
+        (Get-Command Parse-MeasurementOutput -ErrorAction Stop).Source | Should -Be 'FreifunkMetrics'
+        (Get-Command Invoke-CollectNodeMetricsMain -ErrorAction Stop).Source | Should -Be 'FreifunkMetrics'
+    }
+
+    It 'wrapper script loads the module in no-run mode' {
+        Remove-Module FreifunkMetrics -ErrorAction SilentlyContinue
+        . "$PSScriptRoot/../src/collect-node-metrics.ps1" -NoRun
+
+        (Get-Command Parse-MeasurementOutput -ErrorAction Stop).Source | Should -Be 'FreifunkMetrics'
+    }
 }
 
 Describe 'Parse-MeasurementOutput' {
@@ -176,6 +195,68 @@ Describe 'Get-NodeTriggerCommandInfo' {
 
 
 
+Describe 'SSH streaming integration' -Tag 'ssh-streaming' {
+    It 'streams a remote measurement file from one configured test node over SSH' {
+        $configPath = $env:FFMH_TEST_CONFIG_PATH
+        if ([string]::IsNullOrWhiteSpace($configPath)) {
+            throw 'FFMH_TEST_CONFIG_PATH is required for ssh-streaming tests.'
+        }
+
+        $config = Get-EnvironmentConfig -RequestedPath $configPath
+        $nodeResult = Get-TestNodesFromConfig -Config $config
+        $nodes = @($nodeResult.Nodes)
+        if ($nodes.Count -eq 0) {
+            throw 'No TestNodeIPs configured for ssh-streaming test.'
+        }
+
+        $rawDir = Join-Path $TestDrive 'ssh-streaming'
+        New-Item -ItemType Directory -Path $rawDir -Force | Out-Null
+
+        $success = $false
+        $failures = New-Object System.Collections.Generic.List[string]
+
+        foreach ($node in $nodes) {
+            $remoteFile = ('{0}/pester-ssh-streaming-{1}.txt' -f $config.RemoteResultDir.TrimEnd('/'), ([guid]::NewGuid().ToString('N')))
+            $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $config.RemoteResultDir
+            $remoteFileEscaped = Convert-ToShellSingleQuoted -Value $remoteFile
+            $payload = 'speedtest,nodeid=pester download_mbit=12.34,target="https://example.invalid/test.bin" 1772839860'
+            $payloadEscaped = Convert-ToShellSingleQuoted -Value $payload
+            $sshArgs = New-SshArgs -Config $config -NodeIp $node.IP
+
+            try {
+                $prepareCmd = "mkdir -p '$remoteDirEscaped'; printf '%s\n' '$payloadEscaped' > '$remoteFileEscaped'"
+                $prepareOutput = & $config.SshBinary @sshArgs $prepareCmd 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    throw "prepare failed: $($prepareOutput -join ' ')"
+                }
+
+                $result = Collect-NodeResults -Config $config -Node $node -RunId 'run-ssh-streaming' -RawDir $rawDir
+                $files = @($result.Files)
+                if (-not $result.Success) {
+                    throw "collect failed: $($result.ErrorOutput)"
+                }
+
+                $files.Count | Should -Be 1
+                $files[0].ParsedMeasurement.ResultType | Should -Be 'success'
+                $files[0].ParsedMeasurement.NodeId | Should -Be 'pester'
+                $files[0].RawOutput | Should -Match '^speedtest,nodeid=pester'
+                $success = $true
+                break
+            }
+            catch {
+                $failures.Add(($node.IP + ': ' + $_.Exception.Message))
+            }
+            finally {
+                $cleanupCmd = "rm -f '$remoteFileEscaped'"
+                & $config.SshBinary @sshArgs $cleanupCmd 2>$null | Out-Null
+            }
+        }
+
+        if (-not $success) {
+            throw ('No configured test node completed the ssh-streaming test. ' + ($failures -join ' | '))
+        }
+    }
+}
 Describe 'Speedtest target integration' {
     It 'downloads the configured speedtest file with the expected length' -Tag 'integration' {
         $config = @{
