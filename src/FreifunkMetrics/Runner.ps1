@@ -91,7 +91,7 @@ function Invoke-CollectNodeMetricsMain {
                     $reachableCount++
                     $triggeredNodes.Add($node)
                     Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'triggered' -TriggeredAtUtc $triggeredAtUtc -ResultFile $triggerResult.RemoteResultFile -ErrorFile $triggerResult.RemoteErrorFile
-                    Write-NodeActionLog -Node $node -Action 'trigger_success' -Detail 'remote background job started'
+                    Write-NodeActionLog -Node $node -Action 'trigger_success' -Detail ('remote background job started; assigned_delay_seconds=' + $triggerResult.AssignedDelaySeconds)
                 }
                 else {
                     Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'trigger_failed' -TriggeredAtUtc $triggeredAtUtc -ErrorMessage $triggerResult.Error

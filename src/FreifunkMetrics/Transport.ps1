@@ -136,30 +136,141 @@ function Get-FinishedNodeResultCountBatch {
     return @($ready).Count
 }
 
+function Get-NodeTriggerAssignmentOrderKey {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RunId,
+        [Parameter(Mandatory = $true)]
+        [object]$Node
+    )
+
+    $seed = @(
+        $RunId,
+        (Convert-ToTrimmedString -Value $Node.DeviceID),
+        (Convert-ToTrimmedString -Value $Node.IP),
+        (Convert-ToTrimmedString -Value $Node.Name)
+    ) -join '|'
+
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($seed)
+    $hashBytes = [System.Security.Cryptography.SHA256]::HashData($bytes)
+    return [Convert]::ToHexString($hashBytes)
+}
+
+function Get-NodeTriggerAssignments {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$RunId,
+        [Parameter(Mandatory = $true)]
+        [object[]]$Nodes
+    )
+
+    if (@($Nodes).Count -eq 0) {
+        return @()
+    }
+
+    $indexedNodes = for ($i = 0; $i -lt $Nodes.Count; $i++) {
+        [pscustomobject]@{
+            Index = $i
+            Node  = $Nodes[$i]
+        }
+    }
+
+    $delayMaxSeconds = [Math]::Max(0, [int]$Config.TriggerRandomDelayMaxSeconds)
+    $throughputByIp = Get-LatestThroughputByIp -Config $Config
+    $delayByIndex = @{}
+
+    foreach ($item in $indexedNodes) {
+        $delayByIndex[$item.Index] = 0
+    }
+
+    if ($delayMaxSeconds -le 0) {
+        return @(
+            $indexedNodes |
+                ForEach-Object {
+                    [pscustomobject]@{
+                        Index                = $_.Index
+                        Node                 = $_.Node
+                        AssignedDelaySeconds = 0
+                    }
+                }
+        )
+    }
+
+    $positiveNodes = @(
+        $indexedNodes |
+            ForEach-Object {
+                $ip = Convert-ToTrimmedString -Value $_.Node.IP
+                $latestThroughput = 0.0
+                if (-not [string]::IsNullOrWhiteSpace($ip) -and $throughputByIp.ContainsKey($ip)) {
+                    $latestThroughput = [double]$throughputByIp[$ip]
+                }
+
+                [pscustomobject]@{
+                    Index            = $_.Index
+                    Node             = $_.Node
+                    LatestThroughput = $latestThroughput
+                }
+            } |
+            Where-Object { $_.LatestThroughput -gt 0 }
+    )
+
+    if ($positiveNodes.Count -gt 0) {
+        $orderedPositiveNodes = @($positiveNodes | Sort-Object @{ Expression = { $_.LatestThroughput } }, @{ Expression = { Get-NodeTriggerAssignmentOrderKey -RunId $RunId -Node $_.Node } }, @{ Expression = { $_.Index } })
+
+        for ($rank = 0; $rank -lt $orderedPositiveNodes.Count; $rank++) {
+            $assignedDelay = if ($orderedPositiveNodes.Count -eq 1) {
+                $delayMaxSeconds
+            }
+            else {
+                $rawDelay = [int][Math]::Round((((($rank + 1) * $delayMaxSeconds) / [double]$orderedPositiveNodes.Count)), [System.MidpointRounding]::AwayFromZero)
+                [Math]::Max(1, [Math]::Min($delayMaxSeconds, $rawDelay))
+            }
+
+            $delayByIndex[$orderedPositiveNodes[$rank].Index] = $assignedDelay
+        }
+    }
+
+    return @(
+        $indexedNodes |
+            ForEach-Object {
+                [pscustomobject]@{
+                    Index                = $_.Index
+                    Node                 = $_.Node
+                    AssignedDelaySeconds = $delayByIndex[$_.Index]
+                }
+            }
+    )
+}
+
 function Get-NodeTriggerCommandInfo {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [hashtable]$Config,
         [Parameter(Mandatory = $true)]
-        [string]$RunId
+        [string]$RunId,
+        [Parameter(Mandatory = $true)]
+        [int]$AssignedDelaySeconds
     )
 
     $remoteRunDir = Get-RemoteRunResultDir -Config $Config -RunId $RunId
     $remoteResultPattern = "$remoteRunDir/*.txt"
 
-    $delayMaxSeconds = [Math]::Max(0, [int]$Config.TriggerRandomDelayMaxSeconds)
-    $delayUpperBound = $delayMaxSeconds + 1
+    $delaySeconds = [Math]::Max(0, [int]$AssignedDelaySeconds)
     $targetUrl = Convert-ToTrimmedString -Value $Config.SpeedtestTargetUrl
     $targetUrlShell = Convert-ToShellSingleQuoted -Value $targetUrl
     $targetBytes = [Math]::Max(1, [int64]$Config.SpeedtestTargetBytes)
 
     $payload = @"
-start=`$(date +%s%N)
 nodeid=`$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac)
 target_url='$targetUrlShell'
-delay=`$(awk 'BEGIN{srand(); print int(rand()*$delayUpperBound)}')
-sleep "`$delay"
+delay_seconds=$delaySeconds
+sleep "`$delay_seconds"
+start=`$(date +%s%N)
 wget_exit_file="/tmp/harvester-wget-exit-`$$.txt"
 rm -f "`$wget_exit_file"
 t0=`$(date +%s.%N)
@@ -188,9 +299,10 @@ awk -v nodeid="`$nodeid" -v start="`$start" -v t0="`$t0" -v t1="`$t1" -v target=
     $triggerCmd = "mkdir -p '$remoteDirEscaped'; ts=`$(date +%s%N); out='$remoteDirEscaped/'`$ts.txt; ( $payload ) > `"`$out`" 2>&1 &"
 
     return [pscustomobject]@{
-        RemoteResultFile = $remoteResultPattern
-        RemoteErrorFile  = ''
-        TriggerCommand   = $triggerCmd
+        RemoteResultFile     = $remoteResultPattern
+        RemoteErrorFile      = ''
+        TriggerCommand       = $triggerCmd
+        AssignedDelaySeconds = $delaySeconds
     }
 }
 
@@ -202,30 +314,34 @@ function Invoke-NodeTriggerCommand {
         [Parameter(Mandatory = $true)]
         [pscustomobject]$Node,
         [Parameter(Mandatory = $true)]
-        [string]$RunId
+        [string]$RunId,
+        [Parameter(Mandatory = $true)]
+        [int]$AssignedDelaySeconds
     )
 
-    $triggerInfo = Get-NodeTriggerCommandInfo -Config $Config -RunId $RunId
+    $triggerInfo = Get-NodeTriggerCommandInfo -Config $Config -RunId $RunId -AssignedDelaySeconds $AssignedDelaySeconds
     $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
     $output = & $Config.SshBinary @sshArgs $triggerInfo.TriggerCommand 2>&1
     $exitCode = $LASTEXITCODE
 
     if ($exitCode -ne 0) {
         return [pscustomobject]@{
-            Reachable        = $false
-            Triggered        = $false
-            RemoteResultFile = $triggerInfo.RemoteResultFile
-            RemoteErrorFile  = $triggerInfo.RemoteErrorFile
-            Error            = ($output -join ' ')
+            Reachable            = $false
+            Triggered            = $false
+            RemoteResultFile     = $triggerInfo.RemoteResultFile
+            RemoteErrorFile      = $triggerInfo.RemoteErrorFile
+            AssignedDelaySeconds = $triggerInfo.AssignedDelaySeconds
+            Error                = ($output -join ' ')
         }
     }
 
     return [pscustomobject]@{
-        Reachable        = $true
-        Triggered        = $true
-        RemoteResultFile = $triggerInfo.RemoteResultFile
-        RemoteErrorFile  = $triggerInfo.RemoteErrorFile
-        Error            = ''
+        Reachable            = $true
+        Triggered            = $true
+        RemoteResultFile     = $triggerInfo.RemoteResultFile
+        RemoteErrorFile      = $triggerInfo.RemoteErrorFile
+        AssignedDelaySeconds = $triggerInfo.AssignedDelaySeconds
+        Error                = ''
     }
 }
 
@@ -244,16 +360,22 @@ function Invoke-NodeTriggerBatch {
         return @()
     }
 
-    $indexedNodes = for ($i = 0; $i -lt $Nodes.Count; $i++) {
-        [pscustomobject]@{
-            Index = $i
-            Node  = $Nodes[$i]
-        }
-    }
+    $triggerAssignments = @(
+        Get-NodeTriggerAssignments -Config $Config -RunId $RunId -Nodes $Nodes |
+            ForEach-Object {
+                [pscustomobject]@{
+                    Index                = $_.Index
+                    Node                 = $_.Node
+                    AssignedDelaySeconds = $_.AssignedDelaySeconds
+                    TriggerInfo          = (Get-NodeTriggerCommandInfo -Config $Config -RunId $RunId -AssignedDelaySeconds $_.AssignedDelaySeconds)
+                }
+            }
+    )
+
     $parallelism = [Math]::Max(1, [int]$Config.TriggerParallelism)
-    if ($parallelism -le 1 -or $indexedNodes.Count -le 1) {
-        foreach ($item in $indexedNodes) {
-            $triggerResult = Invoke-NodeTriggerCommand -Config $Config -Node $item.Node -RunId $RunId
+    if ($parallelism -le 1 -or $triggerAssignments.Count -le 1) {
+        foreach ($item in $triggerAssignments) {
+            $triggerResult = Invoke-NodeTriggerCommand -Config $Config -Node $item.Node -RunId $RunId -AssignedDelaySeconds $item.AssignedDelaySeconds
             [pscustomobject]@{
                 Index         = $item.Index
                 Node          = $item.Node
@@ -263,16 +385,15 @@ function Invoke-NodeTriggerBatch {
         return
     }
 
-    $triggerInfo = Get-NodeTriggerCommandInfo -Config $Config -RunId $RunId
     $sshHostKeyArgs = Get-SshHostKeyArgs
-    $throttle = [Math]::Min($parallelism, $indexedNodes.Count)
+    $throttle = [Math]::Min($parallelism, $triggerAssignments.Count)
 
-    $indexedNodes |
+    $triggerAssignments |
         ForEach-Object -Parallel {
             $item = $_
             $node = $item.Node
             $config = $using:Config
-            $triggerInfo = $using:triggerInfo
+            $triggerInfo = $item.TriggerInfo
 
             $sshHostKeyArgs = $using:sshHostKeyArgs
             $sshArgs = @(
@@ -291,20 +412,22 @@ function Invoke-NodeTriggerBatch {
 
             $triggerResult = if ($exitCode -eq 0) {
                 [pscustomobject]@{
-                    Reachable        = $true
-                    Triggered        = $true
-                    RemoteResultFile = $triggerInfo.RemoteResultFile
-                    RemoteErrorFile  = $triggerInfo.RemoteErrorFile
-                    Error            = ''
+                    Reachable            = $true
+                    Triggered            = $true
+                    RemoteResultFile     = $triggerInfo.RemoteResultFile
+                    RemoteErrorFile      = $triggerInfo.RemoteErrorFile
+                    AssignedDelaySeconds = $triggerInfo.AssignedDelaySeconds
+                    Error                = ''
                 }
             }
             else {
                 [pscustomobject]@{
-                    Reachable        = $false
-                    Triggered        = $false
-                    RemoteResultFile = $triggerInfo.RemoteResultFile
-                    RemoteErrorFile  = $triggerInfo.RemoteErrorFile
-                    Error            = ($output -join ' ')
+                    Reachable            = $false
+                    Triggered            = $false
+                    RemoteResultFile     = $triggerInfo.RemoteResultFile
+                    RemoteErrorFile      = $triggerInfo.RemoteErrorFile
+                    AssignedDelaySeconds = $triggerInfo.AssignedDelaySeconds
+                    Error                = ($output -join ' ')
                 }
             }
 
@@ -317,6 +440,7 @@ function Invoke-NodeTriggerBatch {
 
     return
 }
+
 
 function Get-CollectStreamMarkers {
     [CmdletBinding()]

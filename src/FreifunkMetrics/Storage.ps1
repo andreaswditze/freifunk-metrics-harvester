@@ -147,6 +147,51 @@ function Start-MeasurementRun {
     }
 }
 
+function Get-LatestThroughputByIp {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config
+    )
+
+    $throughputByIp = @{}
+    $dbPath = Convert-ToTrimmedString -Value $Config.DatabasePath
+    $sqliteBinary = Convert-ToTrimmedString -Value $Config.SQLiteBinary
+
+    if ([string]::IsNullOrWhiteSpace($dbPath) -or [string]::IsNullOrWhiteSpace($sqliteBinary) -or -not (Test-Path -Path $dbPath -PathType Leaf)) {
+        return $throughputByIp
+    }
+
+    $sql = @"
+SELECT ip, COALESCE(throughput_mbit, 0), COALESCE(NULLIF(measured_at_utc, ''), collected_at_utc, ''), id
+FROM measurements
+WHERE ip IS NOT NULL AND ip <> ''
+ORDER BY ip ASC, COALESCE(NULLIF(measured_at_utc, ''), collected_at_utc, '') DESC, id DESC;
+"@
+
+    foreach ($row in @(Invoke-Sqlite -Config $Config -Sql $sql)) {
+        $parts = @([string]$row -split '\|', 4)
+        if ($parts.Count -lt 2) {
+            continue
+        }
+
+        $ip = Convert-ToTrimmedString -Value $parts[0]
+        if ([string]::IsNullOrWhiteSpace($ip) -or $throughputByIp.ContainsKey($ip)) {
+            continue
+        }
+
+        $throughput = 0.0
+        $rawThroughput = Convert-ToTrimmedString -Value $parts[1]
+        if (-not [string]::IsNullOrWhiteSpace($rawThroughput)) {
+            [double]::TryParse($rawThroughput, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$throughput) | Out-Null
+        }
+
+        $throughputByIp[$ip] = $throughput
+    }
+
+    return $throughputByIp
+}
+
 function Save-Measurement {
     [CmdletBinding()]
     param(
@@ -245,7 +290,3 @@ function Add-NodeJobRecord {
 
     Invoke-Sqlite -Config $Config -Sql $sql | Out-Null
 }
-
-
-
-

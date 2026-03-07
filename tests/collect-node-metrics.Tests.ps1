@@ -129,6 +129,25 @@ Describe 'Convert-NodeTimestampToUtc' {
     }
 }
 
+Describe 'Wait-WithProgress' {
+    It 'stops early when all nodes are finished' {
+        $nodes = @(
+            [pscustomobject]@{ DeviceID = 'node-001'; IP = '2a03:2260::1' }
+            [pscustomobject]@{ DeviceID = 'node-002'; IP = '2a03:2260::2' }
+        )
+
+        Mock Get-FinishedNodeResultCountBatch { 2 }
+        Mock Start-Sleep {}
+        Mock Write-Progress {}
+        Mock Update-ConsoleStatus {}
+
+        Wait-WithProgress -Seconds 30 -Config @{} -RunId 'run-a' -Nodes $nodes -PollIntervalSeconds 1
+
+        Assert-MockCalled Get-FinishedNodeResultCountBatch -Times 1 -Exactly
+        Assert-MockCalled Start-Sleep -Times 0 -Exactly
+    }
+}
+
 Describe 'Test-NodeReleaseSupported' {
     It 'accepts 1.5.0 and newer releases' {
         Test-NodeReleaseSupported -Release '1.5.0' | Should -BeTrue
@@ -172,8 +191,38 @@ Describe 'Import-NodeListFromExcel' {
         $nodes.DeviceID | Should -Not -Contain 'node-004'
     }
 }
+Describe 'Get-NodeTriggerAssignments' {
+    It 'sets missing or zero throughputs to 0 and delays faster nodes longer' {
+        $config = @{ TriggerRandomDelayMaxSeconds = 10 }
+        $nodes = @(
+            [pscustomobject]@{ DeviceID = 'node-001'; Name = 'Node 1'; IP = '2a03:2260::1'; Domain = 'dom-a' }
+            [pscustomobject]@{ DeviceID = 'node-002'; Name = 'Node 2'; IP = '2a03:2260::2'; Domain = 'dom-a' }
+            [pscustomobject]@{ DeviceID = 'node-003'; Name = 'Node 3'; IP = '2a03:2260::3'; Domain = 'dom-a' }
+            [pscustomobject]@{ DeviceID = 'node-004'; Name = 'Node 4'; IP = '2a03:2260::4'; Domain = 'dom-a' }
+        )
+
+        Mock Get-LatestThroughputByIp {
+            @{
+                '2a03:2260::2' = 0.0
+                '2a03:2260::3' = 20.0
+                '2a03:2260::4' = 80.0
+            }
+        }
+
+        $assigned = @(Get-NodeTriggerAssignments -Config $config -RunId 'run-a' -Nodes $nodes)
+        $delayByDeviceId = @{}
+        foreach ($item in $assigned) {
+            $delayByDeviceId[$item.Node.DeviceID] = $item.AssignedDelaySeconds
+        }
+
+        $delayByDeviceId['node-001'] | Should -Be 0
+        $delayByDeviceId['node-002'] | Should -Be 0
+        $delayByDeviceId['node-003'] | Should -Be 5
+        $delayByDeviceId['node-004'] | Should -Be 10
+    }
+}
 Describe 'Get-NodeTriggerCommandInfo' {
-    It 'uses configurable delay and target settings' {
+    It 'uses controller-assigned delay and target settings' {
         $config = @{
             RemoteResultDir = '/tmp/harvester'
             TriggerRandomDelayMaxSeconds = 42
@@ -181,11 +230,16 @@ Describe 'Get-NodeTriggerCommandInfo' {
             SpeedtestTargetBytes = 123456789
         }
 
-        $info = Get-NodeTriggerCommandInfo -Config $config -RunId 'run-trigger'
+        $info = Get-NodeTriggerCommandInfo -Config $config -RunId 'run-trigger' -AssignedDelaySeconds 17
         $info.RemoteResultFile | Should -Be '/tmp/harvester/run-trigger/*.txt'
+        $info.AssignedDelaySeconds | Should -Be 17
 
-        $info.TriggerCommand | Should -Match 'rand\(\)\*43'
-        $info.TriggerCommand | Should -Match 'sleep "\$delay"'
+        $info.TriggerCommand | Should -Match 'delay_seconds=17'
+        $info.TriggerCommand | Should -Match 'sleep "\$delay_seconds"'
+        $info.TriggerCommand | Should -Not -Match 'run_id='
+        $info.TriggerCommand | Should -Not -Match 'delay_seed='
+        $info.TriggerCommand | Should -Not -Match 'cksum'
+        $info.TriggerCommand | Should -Not -Match 'srand\('
         $info.TriggerCommand | Should -Match 'target_url=''https://example\.invalid/testfile\.bin'''
         $info.TriggerCommand | Should -Match 'wget_exit_file='
         $info.TriggerCommand | Should -Match 'wc -c'

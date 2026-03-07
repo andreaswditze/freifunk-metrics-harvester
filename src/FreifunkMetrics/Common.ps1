@@ -120,6 +120,10 @@ function Wait-WithProgress {
         }
 
         Write-Progress -Activity $Activity -Status $status -PercentComplete $percent
+
+        if ($nodeCount -gt 0 -and $finishedCount -ge $nodeCount) {
+            break
+        }
         Start-Sleep -Seconds 1
     }
 
