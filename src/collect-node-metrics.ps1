@@ -26,6 +26,7 @@ $script:LogFilePath = $null
 $script:DailyLogDir = $null
 $script:DailyLogFilePath = $null
 $script:ConsoleStatusLength = 0
+$script:ConsoleBannerShown = $false
 
 function Update-ConsoleStatus {
     [CmdletBinding()]
@@ -48,6 +49,21 @@ function Update-ConsoleStatus {
     $padded = $text.PadRight($width)
     Write-Host ("`r$padded") -NoNewline
     $script:ConsoleStatusLength = $width
+}
+
+
+function Show-StartupBanner {
+    [CmdletBinding()]
+    param(
+        [string]$Name = 'collect-node-metrics.ps1'
+    )
+
+    if ($script:ConsoleBannerShown) {
+        return
+    }
+
+    Write-Host $Name
+    $script:ConsoleBannerShown = $true
 }
 
 function Log {
@@ -1111,8 +1127,11 @@ function Insert-NodeJobRecord {
 
 if (-not $NoRun) {
 try {
+    Show-StartupBanner
+    Update-ConsoleStatus -Message 'Startup 1/4: loading config'
     $config = Get-EnvironmentConfig -RequestedPath $ConfigPath
     $script:CurrentConfig = $config
+    Update-ConsoleStatus -Message 'Startup 2/4: preparing directories'
 
     foreach ($pathKey in @('ScriptBaseDir', 'RawResultBaseDir', 'LogDir', 'TempDir')) {
         if (-not (Test-Path -Path $config[$pathKey] -PathType Container)) {
@@ -1131,7 +1150,9 @@ try {
     Log -Message "Using config: $($config.ConfigPath)"
     Log -Message "Config summary: db=$($config.DatabasePath), raw=$($config.RawResultBaseDir), temp=$($config.TempDir), files=$(@($config.ExcelInputFiles).Count), dirs=$(@($config.ExcelInputDirectories).Count), recurse=$($config.ExcelSearchRecurse), test_mode=$($config.UseTestNodeIPs), test_ips=$(@($config.TestNodeIPs).Count)"
 
+    Update-ConsoleStatus -Message 'Startup 3/4: initializing database'
     Initialize-Database -Config $config
+    Update-ConsoleStatus -Message 'Startup 4/4: importing node list'
 
     $importResult = $null
     if ($config.UseTestNodeIPs) {
@@ -1158,6 +1179,7 @@ try {
     $triggeredNodes = New-Object System.Collections.Generic.List[object]
     $reachableCount = 0
 
+    Update-ConsoleStatus -Complete
     Log -Message "Trigger phase start, nodes=$($nodes.Count), parallelism=$($config.TriggerParallelism)"
     $triggerBatchResults = @(Invoke-NodeTriggerBatch -Config $config -Nodes $nodes -RunId $RunId)
     $triggerTotal = [Math]::Max(1, $triggerBatchResults.Count)
