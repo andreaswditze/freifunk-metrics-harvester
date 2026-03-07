@@ -141,3 +141,15 @@ Describe 'Import-NodeListFromExcel' {
         $nodes.DeviceID | Should -Not -Contain 'node-004'
     }
 }
+Describe 'Get-NodeTriggerCommandInfo' {
+    It 'adds a randomized startup delay before the download' {
+        $config = @{ RemoteResultDir = '/tmp/harvester' }
+
+        $info = Get-NodeTriggerCommandInfo -Config $config
+
+        $info.TriggerCommand | Should -Match 'rand\(\)\*601'
+        $info.TriggerCommand | Should -Match 'sleep "\$delay"'
+        $info.TriggerCommand | Should -Match 'wget -O /dev/null -q https://fsn1-speed\.hetzner\.com/100MB\.bin'
+    }
+}
+
