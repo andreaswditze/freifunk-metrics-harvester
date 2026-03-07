@@ -27,6 +27,7 @@ $script:DailyLogDir = $null
 $script:DailyLogFilePath = $null
 $script:ConsoleStatusLength = 0
 $script:ConsoleBannerShown = $false
+$script:ScriptFilePath = $PSCommandPath
 
 function Update-ConsoleStatus {
     [CmdletBinding()]
@@ -961,6 +962,78 @@ function Invoke-NodeTriggerBatch {
             Sort-Object -Property Index
     )
 }
+function Get-CollectStreamMarkers {
+    [CmdletBinding()]
+    param()
+
+    return [pscustomobject]@{
+        BeginPrefix = '__FFMH_FILE_BEGIN__'
+        EndPrefix   = '__FFMH_FILE_END__'
+    }
+}
+
+function Convert-CollectStreamToFiles {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()]
+        [string]$RawOutput,
+        [string]$BeginPrefix = '__FFMH_FILE_BEGIN__',
+        [string]$EndPrefix = '__FFMH_FILE_END__'
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RawOutput)) {
+        return @()
+    }
+
+    $records = New-Object System.Collections.Generic.List[object]
+    $currentPath = ''
+    $currentLines = New-Object System.Collections.Generic.List[string]
+
+    foreach ($line in ($RawOutput -split '\r?\n')) {
+        if ($line.StartsWith($BeginPrefix, [System.StringComparison]::Ordinal)) {
+            $currentPath = $line.Substring($BeginPrefix.Length)
+            $currentLines = New-Object System.Collections.Generic.List[string]
+            continue
+        }
+
+        if ($line.StartsWith($EndPrefix, [System.StringComparison]::Ordinal)) {
+            $endPath = $line.Substring($EndPrefix.Length)
+            if ($currentPath -and ($currentPath -eq $endPath)) {
+                $records.Add([pscustomobject]@{
+                    RemotePath = $currentPath
+                    RawOutput  = ($currentLines -join "`n")
+                })
+            }
+
+            $currentPath = ''
+            $currentLines = New-Object System.Collections.Generic.List[string]
+            continue
+        }
+
+        if ($currentPath) {
+            $currentLines.Add($line)
+        }
+    }
+
+    return @($records.ToArray())
+}
+
+function Test-CollectFileHasMeasurementLine {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()]
+        [string]$RawOutput
+    )
+
+    foreach ($line in ($RawOutput -split '\r?\n')) {
+        if ($line -match '^speedtest,nodeid=') {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Collect-NodeResults {
     [CmdletBinding()]
     param(
@@ -976,28 +1049,30 @@ function Collect-NodeResults {
 
     $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
     $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $Config.RemoteResultDir
-    $listCmd = "find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort"
+    $markers = Get-CollectStreamMarkers
+    $beginPrefixEscaped = Convert-ToShellSingleQuoted -Value $markers.BeginPrefix
+    $endPrefixEscaped = Convert-ToShellSingleQuoted -Value $markers.EndPrefix
+    $streamCmd = @"
+find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while IFS= read -r file; do printf '$beginPrefixEscaped%s\n' "`$file"; cat "`$file"; printf '\n$endPrefixEscaped%s\n' "`$file"; done
+"@
 
-    $listOutput = & $Config.SshBinary @sshArgs $listCmd 2>&1
-    $listExit = $LASTEXITCODE
+    $streamOutput = & $Config.SshBinary @sshArgs $streamCmd 2>&1
+    $streamExit = $LASTEXITCODE
 
-    if ($listExit -ne 0) {
+    if ($streamExit -ne 0) {
         return [pscustomobject]@{
             Success         = $false
             LocalResultPath = ''
             LocalErrorPath  = ''
             RawOutput       = ''
-            ErrorOutput     = ($listOutput -join ' ')
+            ErrorOutput     = ($streamOutput -join ' ')
             Files           = @()
             PendingFiles    = @()
         }
     }
 
-    $remoteFiles = @(
-        $listOutput |
-            ForEach-Object { Convert-ToTrimmedString -Value $_ } |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-    )
+    $streamText = if ($null -eq $streamOutput) { '' } else { $streamOutput -join "`n" }
+    $remoteFiles = @(Convert-CollectStreamToFiles -RawOutput $streamText -BeginPrefix $markers.BeginPrefix -EndPrefix $markers.EndPrefix)
 
     if ($remoteFiles.Count -eq 0) {
         return [pscustomobject]@{
@@ -1017,38 +1092,21 @@ function Collect-NodeResults {
     $downloadErrors = @()
 
     foreach ($remoteFile in $remoteFiles) {
-        $remoteFileEscaped = Convert-ToShellSingleQuoted -Value $remoteFile
-        $remoteLeaf = Split-Path -Path $remoteFile -Leaf
-        $safeLeaf = Get-SafeFileNamePart -Value $remoteLeaf
-        $localPath = Join-Path $RawDir ("{0}_{1}_{2}" -f $Node.DeviceID, $safeIp, $safeLeaf)
-
-        $catOutput = & $Config.SshBinary @sshArgs "cat '$remoteFileEscaped'" 2>&1
-        $catExit = $LASTEXITCODE
-
-        if ($catExit -ne 0) {
-            $downloadErrors += ("cat failed for {0}: {1}" -f $remoteFile, ($catOutput -join ' '))
+        $remotePath = Convert-ToTrimmedString -Value $remoteFile.RemotePath
+        if ([string]::IsNullOrWhiteSpace($remotePath)) {
             continue
         }
 
-        Set-Content -Path $localPath -Value ($catOutput -join "`n") -NoNewline
+        $trimmedRawOutput = Convert-ToTrimmedString -Value $remoteFile.RawOutput
+        $remoteLeaf = Split-Path -Path $remotePath -Leaf
+        $safeLeaf = Get-SafeFileNamePart -Value $remoteLeaf
+        $localPath = Join-Path $RawDir ("{0}_{1}_{2}" -f $Node.DeviceID, $safeIp, $safeLeaf)
 
-        $rawOutput = ''
-        if (Test-Path -Path $localPath -PathType Leaf) {
-            $rawOutput = Get-Content -Path $localPath -Raw
-        }
+        Set-Content -Path $localPath -Value $trimmedRawOutput
 
-        $trimmedRawOutput = Convert-ToTrimmedString -Value $rawOutput
-        $hasMeasurementLine = $false
-        foreach ($line in ($trimmedRawOutput -split '\r?\n')) {
-            if ($line -match '^speedtest,nodeid=') {
-                $hasMeasurementLine = $true
-                break
-            }
-        }
-
-        if (-not $hasMeasurementLine) {
+        if (-not (Test-CollectFileHasMeasurementLine -RawOutput $trimmedRawOutput)) {
             $pendingFiles += [pscustomobject]@{
-                RemotePath = $remoteFile
+                RemotePath = $remotePath
                 LocalPath  = $localPath
                 RawOutput  = $trimmedRawOutput
                 RawSize    = $trimmedRawOutput.Length
@@ -1056,17 +1114,20 @@ function Collect-NodeResults {
             continue
         }
 
-        $null = & $Config.SshBinary @sshArgs "rm -f '$remoteFileEscaped'" 2>&1
-        $deleteExit = $LASTEXITCODE
-        if ($deleteExit -ne 0) {
-            $downloadErrors += ("delete failed for {0}" -f $remoteFile)
-            continue
-        }
-
         $downloaded += [pscustomobject]@{
-            RemotePath = $remoteFile
+            RemotePath = $remotePath
             LocalPath  = $localPath
             RawOutput  = $trimmedRawOutput
+        }
+    }
+
+    if ($downloaded.Count -gt 0) {
+        $deleteTargets = @($downloaded | ForEach-Object { "'$(Convert-ToShellSingleQuoted -Value $_.RemotePath)'" })
+        $deleteCmd = 'rm -f ' + ($deleteTargets -join ' ')
+        $deleteOutput = & $Config.SshBinary @sshArgs $deleteCmd 2>&1
+        $deleteExit = $LASTEXITCODE
+        if ($deleteExit -ne 0) {
+            $downloadErrors += ('delete failed for ' + (@($downloaded | ForEach-Object { $_.RemotePath }) -join ', ') + ': ' + ($deleteOutput -join ' '))
         }
     }
 
@@ -1093,7 +1154,84 @@ function Collect-NodeResults {
         Files           = @($downloaded)
         PendingFiles    = @($pendingFiles)
     }
-}function Parse-MeasurementOutput {
+}
+
+function Invoke-NodeCollectBatch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [pscustomobject[]]$Nodes,
+        [Parameter(Mandatory = $true)]
+        [string]$RunId,
+        [Parameter(Mandatory = $true)]
+        [string]$RawDir
+    )
+
+    if ($Nodes.Count -eq 0) {
+        return
+    }
+
+    $indexedNodes = for ($i = 0; $i -lt $Nodes.Count; $i++) {
+        [pscustomobject]@{
+            Index = $i
+            Node  = $Nodes[$i]
+        }
+    }
+
+    $parallelism = [Math]::Max(1, [int]$Config.CollectParallelism)
+    if ($parallelism -le 1 -or $indexedNodes.Count -le 1) {
+        foreach ($item in $indexedNodes) {
+            [pscustomobject]@{
+                Index         = $item.Index
+                Node          = $item.Node
+                CollectResult = (Collect-NodeResults -Config $Config -Node $item.Node -RunId $RunId -RawDir $RawDir)
+            }
+        }
+        return
+    }
+
+    $throttle = [Math]::Min($parallelism, $indexedNodes.Count)
+    $selfScriptPath = $script:ScriptFilePath
+    $batchConfig = $Config
+    $batchRunId = $RunId
+    $batchRawDir = $RawDir
+
+    $indexedNodes |
+        ForEach-Object -Parallel {
+            $item = $_
+            $config = $using:batchConfig
+            $collectRunIdentifier = $using:batchRunId
+            $rawDir = $using:batchRawDir
+            $scriptPath = $using:selfScriptPath
+
+            . $scriptPath -NoRun
+
+            try {
+                $collectResult = Collect-NodeResults -Config $config -Node $item.Node -RunId $collectRunIdentifier -RawDir $rawDir
+            }
+            catch {
+                $collectResult = [pscustomobject]@{
+                    Success         = $false
+                    LocalResultPath = ''
+                    LocalErrorPath  = ''
+                    RawOutput       = ''
+                    ErrorOutput     = $_.Exception.Message
+                    Files           = @()
+                    PendingFiles    = @()
+                }
+            }
+
+            [pscustomobject]@{
+                Index         = $item.Index
+                Node          = $item.Node
+                CollectResult = $collectResult
+            }
+        } -ThrottleLimit $throttle
+}
+
+function Parse-MeasurementOutput {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -1252,7 +1390,7 @@ try {
 
     Log -Message 'Startup'
     Log -Message "Using config: $($config.ConfigPath)"
-    Log -Message "Config summary: db=$($config.DatabasePath), raw=$($config.RawResultBaseDir), temp=$($config.TempDir), files=$(@($config.ExcelInputFiles).Count), dirs=$(@($config.ExcelInputDirectories).Count), recurse=$($config.ExcelSearchRecurse), test_mode=$($config.UseTestNodeIPs), test_ips=$(@($config.TestNodeIPs).Count)"
+    Log -Message "Config summary: db=$($config.DatabasePath), raw=$($config.RawResultBaseDir), temp=$($config.TempDir), files=$(@($config.ExcelInputFiles).Count), dirs=$(@($config.ExcelInputDirectories).Count), recurse=$($config.ExcelSearchRecurse), test_mode=$($config.UseTestNodeIPs), test_ips=$(@($config.TestNodeIPs).Count), trigger_parallelism=$($config.TriggerParallelism), collect_parallelism=$($config.CollectParallelism), random_delay_max=$($config.TriggerRandomDelayMaxSeconds), target_bytes=$($config.SpeedtestTargetBytes)"
 
     Update-ConsoleStatus -Message 'Startup 3/4: initializing database'
     Initialize-Database -Config $config
@@ -1329,14 +1467,15 @@ try {
     $collectTotal = [Math]::Max(1, $triggeredNodes.Count)
     $collectIndex = 0
 
-    Log -Message "Collect phase start, nodes=$($triggeredNodes.Count)"
-    foreach ($node in $triggeredNodes) {
+    Log -Message "Collect phase start, nodes=$($triggeredNodes.Count), parallelism=$($config.CollectParallelism)"
+    foreach ($collectEntry in Invoke-NodeCollectBatch -Config $config -Nodes @($triggeredNodes) -RunId $RunId -RawDir $runInfo.RawDir) {
         $collectIndex++
+        $node = $collectEntry.Node
+        $collect = $collectEntry.CollectResult
         Update-ConsoleStatus -Message ("Collect {0}/{1}: {2}" -f $collectIndex, $collectTotal, $node.IP)
         Write-Progress -Id 2 -Activity 'Collecting node results' -Status ("{0}/{1}" -f $collectIndex, $collectTotal) -PercentComplete ([int](($collectIndex / [double]$collectTotal) * 100))
         try {
             Log-NodeAction -Node $node -Action 'collect_start' -Detail 'attempting result collection'
-            $collect = Collect-NodeResults -Config $config -Node $node -RunId $RunId -RawDir $runInfo.RawDir
             $collectedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
 
             if (-not $collect.Success) {
