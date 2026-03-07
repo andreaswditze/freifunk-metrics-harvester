@@ -345,6 +345,38 @@ Describe 'Collect-NodeResults' {
     }
 }
 
+
+Describe 'Get-ReadyNodeResultCountBatch' {
+    It 'counts nodes with available remote result files' {
+        $mockSsh = Join-Path $TestDrive 'mock-ssh-ready.ps1'
+        @(
+            '$command = $args[-1]'
+            '$nodeHost = $args[-2]'
+            'if ($command -like ''find*'') {'
+            '    if ($nodeHost -like ''*::1'') { Write-Output ''/tmp/harvester/1700000001.txt'' }'
+            '    exit 0'
+            '}'
+            'Write-Output (''unexpected command: {0}'' -f $command)'
+            'exit 9'
+        ) | Set-Content -Path $mockSsh
+
+        $config = @{
+            SshBinary = $mockSsh
+            SshKeyPath = 'ignore'
+            SshUser = 'root'
+            SshConnectTimeoutSeconds = 1
+            RemoteResultDir = '/tmp/harvester'
+            CollectParallelism = 2
+        }
+        $nodes = @(
+            [pscustomobject]@{ DeviceID = 'node-001'; Name = 'Node 1'; IP = '2a03:2260::1'; Domain = 'dom-a' }
+            [pscustomobject]@{ DeviceID = 'node-002'; Name = 'Node 2'; IP = '2a03:2260::2'; Domain = 'dom-b' }
+        )
+
+        Get-ReadyNodeResultCountBatch -Config $config -Nodes $nodes | Should -Be 1
+    }
+}
+
 Describe 'Invoke-NodeCollectBatch' {
     It 'collects multiple nodes in parallel' {
         $mockSsh = Join-Path $TestDrive 'mock-ssh-batch.ps1'

@@ -110,18 +110,43 @@ function Wait-WithProgress {
     param(
         [Parameter(Mandatory = $true)]
         [int]$Seconds,
-        [string]$Activity = 'Waiting before collect phase'
+        [string]$Activity = 'Waiting before collect phase',
+        [hashtable]$Config = @{},
+        [pscustomobject[]]$Nodes = @(),
+        [int]$PollIntervalSeconds = 15
     )
 
     if ($Seconds -le 0) {
         return
     }
 
-    Update-ConsoleStatus -Complete
+    $nodeCount = @($Nodes).Count
+    $pollInterval = [Math]::Max(1, $PollIntervalSeconds)
+    $readyCount = -1
+
     for ($elapsed = 0; $elapsed -lt $Seconds; $elapsed++) {
         $remaining = $Seconds - $elapsed
         $percent = [int](($elapsed / [double]$Seconds) * 100)
-        Write-Progress -Activity $Activity -Status ('Remaining: {0}s' -f $remaining) -PercentComplete $percent
+
+        if ($nodeCount -gt 0 -and (($elapsed -eq 0) -or (($elapsed % $pollInterval) -eq 0))) {
+            try {
+                $readyCount = Get-ReadyNodeResultCountBatch -Config $Config -Nodes $Nodes
+            }
+            catch {
+                $readyCount = -1
+            }
+        }
+
+        if ($nodeCount -gt 0 -and $readyCount -ge 0) {
+            $status = 'Remaining: {0}s | ready: {1}/{2}' -f $remaining, $readyCount, $nodeCount
+            Update-ConsoleStatus -Message ('Wait {0}/{1}s: ready {2}/{3} nodes' -f $elapsed, $Seconds, $readyCount, $nodeCount)
+        }
+        else {
+            $status = 'Remaining: {0}s' -f $remaining
+            Update-ConsoleStatus -Message ('Wait {0}/{1}s' -f $elapsed, $Seconds)
+        }
+
+        Write-Progress -Activity $Activity -Status $status -PercentComplete $percent
         Start-Sleep -Seconds 1
     }
 
@@ -824,6 +849,71 @@ function New-SshArgs {
     )
 }
 
+function Test-NodeResultReady {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Node
+    )
+
+    $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
+    $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $Config.RemoteResultDir
+    $probeCmd = "find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print -quit"
+    $output = & $Config.SshBinary @sshArgs $probeCmd 2>&1
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        return $false
+    }
+
+    $text = Convert-ToTrimmedString -Value ($output -join "`n")
+    return -not [string]::IsNullOrWhiteSpace($text)
+}
+
+function Get-ReadyNodeResultCountBatch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [pscustomobject[]]$Nodes
+    )
+
+    if (@($Nodes).Count -eq 0) {
+        return 0
+    }
+
+    $indexedNodes = for ($i = 0; $i -lt $Nodes.Count; $i++) {
+        [pscustomobject]@{
+            Index = $i
+            Node  = $Nodes[$i]
+        }
+    }
+
+    $parallelism = [Math]::Max(1, [int]([Math]::Min([Math]::Max(1, [int]$Config.CollectParallelism), $indexedNodes.Count)))
+    if ($parallelism -le 1 -or $indexedNodes.Count -le 1) {
+        return @($indexedNodes | Where-Object { Test-NodeResultReady -Config $Config -Node $_.Node }).Count
+    }
+
+    $batchConfig = $Config
+    $selfScriptPath = $script:ScriptFilePath
+    $ready = @(
+        $indexedNodes |
+            ForEach-Object -Parallel {
+                $item = $_
+                $config = $using:batchConfig
+                $scriptPath = $using:selfScriptPath
+                . $scriptPath -NoRun
+                if (Test-NodeResultReady -Config $config -Node $item.Node) {
+                    $item.Index
+                }
+            } -ThrottleLimit $parallelism
+    )
+
+    return @($ready).Count
+}
+
 function Get-NodeTriggerCommandInfo {
     [CmdletBinding()]
     param(
@@ -1499,7 +1589,7 @@ try {
     $waitSeconds = [Math]::Max(0, [int]$config.TriggerRandomDelayMaxSeconds) * 2
     if ($waitSeconds -gt 0) {
         Log -Message "Waiting $waitSeconds seconds before collect phase"
-        Wait-WithProgress -Seconds $waitSeconds -Activity 'Waiting for randomized download starts'
+        Wait-WithProgress -Seconds $waitSeconds -Activity 'Waiting for randomized download starts' -Config $config -Nodes @($triggeredNodes)
     }
 
     $collectedCount = 0
@@ -1507,7 +1597,7 @@ try {
     $parsedCount = 0
     $collectTotal = [Math]::Max(1, $triggeredNodes.Count)
     $collectIndex = 0
-    Update-ConsoleStatus -Message ("Collect 0/{0}: waiting for completed jobs" -f $collectTotal)
+    Update-ConsoleStatus -Message ("Collect 0/{0}: starting result collection" -f $collectTotal)
     Write-Progress -Id 2 -Activity 'Collecting node results' -Status ("0/{0}" -f $collectTotal) -PercentComplete 0
 
     Log -Message "Collect phase start, nodes=$($triggeredNodes.Count), parallelism=$($config.CollectParallelism)"
