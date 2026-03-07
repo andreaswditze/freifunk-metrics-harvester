@@ -37,6 +37,7 @@ Describe 'Parse-MeasurementOutput' {
     It 'returns null for failed or invalid speedtest markers' {
         Parse-MeasurementOutput -RawOutput 'wget_failed exit=4 bytes=0 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" start=1772839860' | Should -BeNullOrEmpty
         Parse-MeasurementOutput -RawOutput 'speedtest_invalid bytes=0 sec=0 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" start=1772839860' | Should -BeNullOrEmpty
+        Parse-MeasurementOutput -RawOutput 'speedtest_size_mismatch bytes=104857599 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" start=1772839860' | Should -BeNullOrEmpty
     }
     It 'returns null for empty payload' {
         $parsed = Parse-MeasurementOutput -RawOutput ''
@@ -163,6 +164,7 @@ Describe 'Get-NodeTriggerCommandInfo' {
         $info.TriggerCommand | Should -Match 'wget_exit_file='
         $info.TriggerCommand | Should -Match 'wc -c'
         $info.TriggerCommand | Should -Match 'expected_bytes="?123456789"?'
+        $info.TriggerCommand | Should -Match 'speedtest_size_mismatch bytes='
     }
 }
 

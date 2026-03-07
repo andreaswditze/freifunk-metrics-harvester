@@ -855,6 +855,10 @@ awk -v nodeid="`$nodeid" -v start="`$start" -v t0="`$t0" -v t1="`$t1" -v target=
         printf "speedtest_invalid bytes=%s sec=%s expected_bytes=%s target=\"%s\" start=%s\n",bytes,sec,expected_bytes,target,start
         exit 0
     }
+    if (bytes != expected_bytes) {
+        printf "speedtest_size_mismatch bytes=%s expected_bytes=%s target=\"%s\" start=%s\n",bytes,expected_bytes,target,start
+        exit 0
+    }
     printf "speedtest,nodeid=%s download_mbit=%.2f,target=\"%s\" %s\n",nodeid,(bytes*8)/(sec*1000000),target,start
 }'
 "@
