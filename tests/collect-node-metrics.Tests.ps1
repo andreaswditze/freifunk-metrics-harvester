@@ -97,12 +97,17 @@ Describe 'Invoke-CollectNodeMetricsMain' {
 
                 Assert-MockCalled Complete-MeasurementRun -Times 1 -Exactly -ParameterFilter { $ReachableNodes -eq 2 -and $CollectedNodes -eq 2 -and $ParsedNodes -eq 2 -and $Status -eq 'completed' }
                 Assert-MockCalled Write-Log -Times 1 -ParameterFilter { $Message -eq 'Run summary: total=3, reachable=2, collected_nodes=2, collected_files=2, parsed=2, successful_nodes=1, failed_nodes=2' }
-                @($script:HostMessages) | Should -Contain 'Node delivery summary: successful=1, failed=2'
-                @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' }) | Should -HaveCount 1
-                @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'download_failed=1'
-                @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'not_reachable=1'
-                @($script:HostMessages) | Should -Contain ' - Node 2 (2a03:2260::2): download_failed [final; wget_failed]'
-                @($script:HostMessages) | Should -Contain ' - Node 3 (2a03:2260::3): not_reachable [trigger; ssh failed]'
+                try {
+                    @($script:HostMessages) | Should -Contain 'Node delivery summary: successful=1, failed=2'
+                    @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' }) | Should -HaveCount 1
+                    @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'download_failed=1'
+                    @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'not_reachable=1'
+                    @($script:HostMessages) | Should -Contain ' - Node 2 (2a03:2260::2): download_failed [final; wget_failed]'
+                    @($script:HostMessages) | Should -Contain ' - Node 3 (2a03:2260::3): not_reachable [trigger; ssh failed]'
+                }
+                catch {
+                    throw ('Host messages were: ' + (@($script:HostMessages) -join ' || '))
+                }
             }
             finally {
                 $script:CurrentConfig = $null
