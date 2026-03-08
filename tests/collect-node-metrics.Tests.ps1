@@ -283,6 +283,32 @@ Describe 'Wait-WithProgress' {
         }
     }
 }
+Describe 'Receive-NodeResultCountPoll' {
+    It 'returns poll results and removes the finished job' {
+        InModuleScope FreifunkMetrics {
+            $job = [pscustomobject]@{ Id = 42 }
+            $expected = [pscustomobject]@{ PendingNodeKeys = @('node-002|2a03:2260::2||') }
+
+            Mock Receive-Job {
+                param($Job, [switch]$AutoRemoveJob)
+
+                if ($AutoRemoveJob) {
+                    throw 'AutoRemoveJob must not be used here'
+                }
+
+                return $expected
+            }
+            Mock Remove-Job {}
+
+            $result = Receive-NodeResultCountPoll -Job $job
+
+            @($result.PendingNodeKeys) | Should -Be @('node-002|2a03:2260::2||')
+            Assert-MockCalled Receive-Job -Times 1 -Exactly
+            Assert-MockCalled Remove-Job -Times 1 -Exactly
+        }
+    }
+}
+
 Describe 'Test-NodeReleaseSupported' {
     It 'accepts 1.5.0 and newer releases' {
         Test-NodeReleaseSupported -Release '1.5.0' | Should -BeTrue

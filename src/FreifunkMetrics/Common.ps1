@@ -93,6 +93,55 @@ function Get-NodeProgressKey {
     ) -join '|'
 }
 
+function Get-PendingNodeProgressKeysBatch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$RunId,
+        [Parameter(Mandatory = $true)]
+        [object[]]$Nodes
+    )
+
+    if (@($Nodes).Count -eq 0) {
+        return @()
+    }
+
+    $indexedNodes = for ($i = 0; $i -lt $Nodes.Count; $i++) {
+        [pscustomobject]@{
+            Index = $i
+            Node  = $Nodes[$i]
+        }
+    }
+
+    $parallelism = [Math]::Max(1, [int]([Math]::Min([Math]::Max(1, [int]$Config.CollectParallelism), $indexedNodes.Count)))
+    if ($parallelism -le 1 -or $indexedNodes.Count -le 1) {
+        return @(
+            $indexedNodes |
+                Where-Object { -not (Test-NodeResultFinished -Config $Config -RunId $RunId -Node $_.Node) } |
+                ForEach-Object { Get-NodeProgressKey -Node $_.Node }
+        )
+    }
+
+    $batchConfig = $Config
+    $batchRunId = $RunId
+    $modulePath = $script:ModuleFilePath
+    return @(
+        $indexedNodes |
+            ForEach-Object -Parallel {
+                $item = $_
+                $config = $using:batchConfig
+                $runId = $using:batchRunId
+                $modulePath = $using:modulePath
+                Import-Module $modulePath -Force | Out-Null
+                if (-not (Test-NodeResultFinished -Config $config -RunId $runId -Node $item.Node)) {
+                    Get-NodeProgressKey -Node $item.Node
+                }
+            } -ThrottleLimit $parallelism
+    )
+}
+
 function Start-NodeResultCountPoll {
     [CmdletBinding()]
     param(
@@ -105,16 +154,8 @@ function Start-NodeResultCountPoll {
         param($PollConfig, $PollRunId, $PollNodes, $ModulePath)
 
         Import-Module $ModulePath -Force | Out-Null
-
-        $pendingNodeKeys = New-Object System.Collections.Generic.List[string]
-        foreach ($pollNode in @($PollNodes)) {
-            if (-not (Test-NodeResultFinished -Config $PollConfig -RunId $PollRunId -Node $pollNode)) {
-                $pendingNodeKeys.Add((Get-NodeProgressKey -Node $pollNode))
-            }
-        }
-
         [pscustomobject]@{
-            PendingNodeKeys = @($pendingNodeKeys.ToArray())
+            PendingNodeKeys = @(Get-PendingNodeProgressKeysBatch -Config $PollConfig -RunId $PollRunId -Nodes $PollNodes)
         }
     }
 
@@ -131,7 +172,7 @@ function Receive-NodeResultCountPoll {
     )
 
     try {
-        $result = @(Receive-Job -Job $Job -AutoRemoveJob -ErrorAction Stop)
+        $result = @(Receive-Job -Job $Job -ErrorAction Stop)
         if ($result.Count -eq 0) {
             return $null
         }
@@ -145,6 +186,13 @@ function Receive-NodeResultCountPoll {
     }
     catch {
         return $null
+    }
+    finally {
+        try {
+            Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue | Out-Null
+        }
+        catch {
+        }
     }
 }
 
