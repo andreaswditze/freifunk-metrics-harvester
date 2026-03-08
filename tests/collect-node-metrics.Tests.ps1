@@ -139,7 +139,7 @@ Describe 'Wait-WithProgress' {
 
             Mock Get-Date { [datetime]'2026-03-08T12:00:00Z' }
             Mock Start-NodeResultCountPoll { [pscustomobject]@{ State = 'Completed' } }
-            Mock Receive-NodeResultCountPoll { 2 }
+            Mock Receive-NodeResultCountPoll { [pscustomobject]@{ PendingNodeKeys = @() } }
             Mock Stop-NodeResultCountPoll {}
             Mock Start-Sleep {}
             Mock Write-Progress {}
@@ -185,12 +185,104 @@ Describe 'Wait-WithProgress' {
             Assert-MockCalled Start-Sleep -Times 3 -Exactly
             Assert-MockCalled Stop-NodeResultCountPoll -Times 1 -Exactly
             Assert-MockCalled Update-ConsoleStatus -Times 4 -ParameterFilter { $Message -match 'finished pending/1 nodes' }
-
             Assert-MockCalled Update-ConsoleStatus -Times 4
         }
     }
-}
 
+    It 'polls only the remaining nodes after a successful update' {
+        InModuleScope FreifunkMetrics {
+            $nodes = @(
+                [pscustomobject]@{ DeviceID = 'node-001'; IP = '2a03:2260::1' }
+                [pscustomobject]@{ DeviceID = 'node-002'; IP = '2a03:2260::2' }
+            )
+            $timestamps = @(
+                [datetime]'2026-03-08T12:00:00Z'
+                [datetime]'2026-03-08T12:00:00Z'
+                [datetime]'2026-03-08T12:00:01Z'
+                [datetime]'2026-03-08T12:00:02Z'
+            )
+            $script:dateIndex = 0
+            $script:pollIndex = 0
+
+            Mock Get-Date {
+                $current = $timestamps[[Math]::Min($script:dateIndex, $timestamps.Count - 1)]
+                $script:dateIndex++
+                $current
+            }
+            Mock Start-NodeResultCountPoll {
+                if ($script:pollIndex -eq 0) {
+                    $script:pollIndex++
+                    [pscustomobject]@{ State = 'Completed'; Id = 'first' }
+                }
+                else {
+                    [pscustomobject]@{ State = 'Running'; Id = 'second' }
+                }
+            }
+            Mock Receive-NodeResultCountPoll {
+                [pscustomobject]@{ PendingNodeKeys = @((Get-NodeProgressKey -Node $nodes[1])) }
+            }
+            Mock Stop-NodeResultCountPoll {}
+            Mock Start-Sleep {}
+            Mock Write-Progress {}
+            Mock Update-ConsoleStatus {}
+
+            Wait-WithProgress -Seconds 2 -Config @{} -RunId 'run-a' -Nodes $nodes -PollIntervalSeconds 1
+
+            Assert-MockCalled Start-NodeResultCountPoll -Times 1 -Exactly -ParameterFilter { @($Nodes).Count -eq 2 }
+            Assert-MockCalled Start-NodeResultCountPoll -Times 1 -Exactly -ParameterFilter { @($Nodes).Count -eq 1 }
+        }
+    }
+
+    It 'keeps the last finished count when a later poll fails' {
+        InModuleScope FreifunkMetrics {
+            $nodes = @(
+                [pscustomobject]@{ DeviceID = 'node-001'; IP = '2a03:2260::1' }
+                [pscustomobject]@{ DeviceID = 'node-002'; IP = '2a03:2260::2' }
+            )
+            $timestamps = @(
+                [datetime]'2026-03-08T12:00:00Z'
+                [datetime]'2026-03-08T12:00:00Z'
+                [datetime]'2026-03-08T12:00:01Z'
+                [datetime]'2026-03-08T12:00:02Z'
+            )
+            $script:dateIndex = 0
+            $script:pollIndex = 0
+
+            Mock Get-Date {
+                $current = $timestamps[[Math]::Min($script:dateIndex, $timestamps.Count - 1)]
+                $script:dateIndex++
+                $current
+            }
+            Mock Start-NodeResultCountPoll {
+                if ($script:pollIndex -eq 0) {
+                    $script:pollIndex++
+                    [pscustomobject]@{ State = 'Completed'; Id = 'first' }
+                }
+                else {
+                    [pscustomobject]@{ State = 'Completed'; Id = 'second' }
+                }
+            }
+            Mock Receive-NodeResultCountPoll {
+                param($Job)
+
+                if ($Job.Id -eq 'first') {
+                    return [pscustomobject]@{ PendingNodeKeys = @((Get-NodeProgressKey -Node $nodes[1])) }
+                }
+
+                return $null
+            }
+            Mock Stop-NodeResultCountPoll {}
+            Mock Start-Sleep {}
+            Mock Write-Progress {}
+            Mock Update-ConsoleStatus {}
+
+            Wait-WithProgress -Seconds 2 -Config @{} -RunId 'run-a' -Nodes $nodes -PollIntervalSeconds 2
+
+            Assert-MockCalled Receive-NodeResultCountPoll -Times 2 -Exactly
+            Assert-MockCalled Update-ConsoleStatus -Times 3 -ParameterFilter { $Message -match 'finished 1/2 nodes' }
+        }
+    }
+}
 Describe 'Test-NodeReleaseSupported' {
     It 'accepts 1.5.0 and newer releases' {
         Test-NodeReleaseSupported -Release '1.5.0' | Should -BeTrue

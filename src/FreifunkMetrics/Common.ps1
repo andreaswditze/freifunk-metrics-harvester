@@ -77,6 +77,21 @@ function Write-NodeActionLog {
     Write-Log -Level $Level -Message $message
 }
 
+function Get-NodeProgressKey {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Node
+    )
+
+    return @(
+        Convert-ToTrimmedString -Value $Node.DeviceID
+        Convert-ToTrimmedString -Value $Node.IP
+        Convert-ToTrimmedString -Value $Node.Name
+        Convert-ToTrimmedString -Value $Node.Domain
+    ) -join '|'
+}
+
 function Start-NodeResultCountPoll {
     [CmdletBinding()]
     param(
@@ -90,14 +105,16 @@ function Start-NodeResultCountPoll {
 
         Import-Module $ModulePath -Force | Out-Null
 
-        $finished = 0
+        $pendingNodeKeys = New-Object System.Collections.Generic.List[string]
         foreach ($pollNode in @($PollNodes)) {
-            if (Test-NodeResultFinished -Config $PollConfig -RunId $PollRunId -Node $pollNode) {
-                $finished++
+            if (-not (Test-NodeResultFinished -Config $PollConfig -RunId $PollRunId -Node $pollNode)) {
+                $pendingNodeKeys.Add((Get-NodeProgressKey -Node $pollNode))
             }
         }
 
-        $finished
+        [pscustomobject]@{
+            PendingNodeKeys = @($pendingNodeKeys.ToArray())
+        }
     }
 
     $pollConfig = @{} + $Config
@@ -115,13 +132,18 @@ function Receive-NodeResultCountPoll {
     try {
         $result = @(Receive-Job -Job $Job -AutoRemoveJob -ErrorAction Stop)
         if ($result.Count -eq 0) {
-            return -1
+            return $null
         }
 
-        return [int]$result[-1]
+        $pollResult = $result[-1]
+        if ($null -eq $pollResult -or -not ($pollResult.PSObject.Properties.Name -contains 'PendingNodeKeys')) {
+            return $null
+        }
+
+        return $pollResult
     }
     catch {
-        return -1
+        return $null
     }
 }
 
@@ -166,8 +188,10 @@ function Wait-WithProgress {
     }
 
     $nodeCount = @($Nodes).Count
+    $pendingNodes = @($Nodes)
     $pollInterval = [Math]::Max(1, $PollIntervalSeconds)
     $finishedCount = -1
+    $hasFinishedCount = $false
     $startedAt = Get-Date
     $nextPollElapsed = 0
     $pollJob = $null
@@ -178,18 +202,31 @@ function Wait-WithProgress {
             $remaining = [Math]::Max(0, $Seconds - $elapsed)
             $percent = [int]((($Seconds - $remaining) / [double]$Seconds) * 100)
 
-            if ($nodeCount -gt 0 -and $null -eq $pollJob -and $elapsed -ge $nextPollElapsed) {
-                $pollJob = Start-NodeResultCountPoll -Config $Config -RunId $RunId -Nodes $Nodes
+            if ($pendingNodes.Count -gt 0 -and $null -eq $pollJob -and $elapsed -ge $nextPollElapsed) {
+                $pollJob = Start-NodeResultCountPoll -Config $Config -RunId $RunId -Nodes $pendingNodes
                 $nextPollElapsed = $elapsed + $pollInterval
             }
 
             if ($null -ne $pollJob -and $pollJob.State -in @('Completed', 'Failed', 'Stopped')) {
-                $finishedCount = Receive-NodeResultCountPoll -Job $pollJob
+                $pollResult = Receive-NodeResultCountPoll -Job $pollJob
                 $pollJob = $null
+
+                if ($null -ne $pollResult) {
+                    $pendingNodeKeys = @($pollResult.PendingNodeKeys)
+                    if ($pendingNodeKeys.Count -eq 0) {
+                        $pendingNodes = @()
+                    }
+                    else {
+                        $pendingNodes = @($pendingNodes | Where-Object { $pendingNodeKeys -contains (Get-NodeProgressKey -Node $_) })
+                    }
+
+                    $finishedCount = $nodeCount - $pendingNodes.Count
+                    $hasFinishedCount = $true
+                }
             }
 
             if ($nodeCount -gt 0) {
-                $finishedLabel = if ($finishedCount -ge 0) { $finishedCount } else { 'pending' }
+                $finishedLabel = if ($hasFinishedCount) { $finishedCount } else { 'pending' }
                 $status = 'Remaining: {0}s | finished: {1}/{2}' -f $remaining, $finishedLabel, $nodeCount
                 Update-ConsoleStatus -Message ('Wait {0}/{1}s: finished {2}/{3} nodes' -f $elapsed, $Seconds, $finishedLabel, $nodeCount)
             }
@@ -200,7 +237,7 @@ function Wait-WithProgress {
 
             Write-Progress -Activity $Activity -Status $status -PercentComplete $percent
 
-            if ($nodeCount -gt 0 -and $finishedCount -ge $nodeCount) {
+            if ($nodeCount -gt 0 -and $hasFinishedCount -and $finishedCount -ge $nodeCount) {
                 break
             }
 
