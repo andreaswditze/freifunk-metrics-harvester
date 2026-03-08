@@ -69,6 +69,8 @@ function Invoke-CollectNodeMetricsMain {
 
         $triggeredNodes = New-Object System.Collections.Generic.List[object]
         $reachableCount = 0
+        $successfulDeliveryNodeCount = 0
+        $failedDeliveryNodeCount = 0
 
         Update-ConsoleStatus -Complete
         Write-Log -Message "Trigger phase start, nodes=$($nodes.Count), parallelism=$($config.TriggerParallelism)"
@@ -94,11 +96,13 @@ function Invoke-CollectNodeMetricsMain {
                     Write-NodeActionLog -Node $node -Action 'trigger_success' -Detail ('remote background job started; assigned_delay_seconds=' + $triggerResult.AssignedDelaySeconds)
                 }
                 else {
+                    $failedDeliveryNodeCount++
                     Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'trigger_failed' -TriggeredAtUtc $triggeredAtUtc -ErrorMessage $triggerResult.Error
                     Write-NodeActionLog -Node $node -Action 'trigger_failed' -Detail $triggerResult.Error -Level WARN
                 }
             }
             catch {
+                $failedDeliveryNodeCount++
                 Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'trigger_exception' -TriggeredAtUtc ((Get-Date).ToUniversalTime().ToString('o')) -ErrorMessage $_.Exception.Message
                 Write-NodeActionLog -Node $node -Action 'trigger_exception' -Detail $_.Exception.Message -Level ERROR
             }
@@ -131,6 +135,7 @@ function Invoke-CollectNodeMetricsMain {
                 $collectedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
 
                 if (-not $collect.Success) {
+                    $failedDeliveryNodeCount++
                     Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_failed' -CollectedAtUtc $collectedAtUtc -ErrorMessage $collect.ErrorOutput
                     Write-NodeActionLog -Node $node -Action 'collect_failed' -Detail $collect.ErrorOutput -Level WARN
                     continue
@@ -147,10 +152,12 @@ function Invoke-CollectNodeMetricsMain {
 
                 if ($collectedFiles.Count -eq 0) {
                     if ($pendingFiles.Count -gt 0) {
+                        $failedDeliveryNodeCount++
                         continue
                     }
 
                     $emptyMessage = 'no files found in remote harvester dir'
+                    $failedDeliveryNodeCount++
                     Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collected_empty' -CollectedAtUtc $collectedAtUtc -ErrorMessage $emptyMessage
                     Write-NodeActionLog -Node $node -Action 'collect_empty' -Detail $emptyMessage -Level WARN
                     continue
@@ -162,6 +169,13 @@ function Invoke-CollectNodeMetricsMain {
                 $successfulFiles = @($collectedFiles | Where-Object { $_.ParsedMeasurement.ResultType -eq 'success' })
                 $failedFiles = @($collectedFiles | Where-Object { $_.ParsedMeasurement.ResultType -eq 'final_failed' })
                 $nodeStatus = if ($successfulFiles.Count -gt 0 -and $failedFiles.Count -gt 0) { 'collected_mixed' } elseif ($successfulFiles.Count -gt 0) { 'collected' } else { 'collected_failed_result' }
+
+                if ($successfulFiles.Count -gt 0) {
+                    $successfulDeliveryNodeCount++
+                }
+                else {
+                    $failedDeliveryNodeCount++
+                }
 
                 $resultFiles = (@($collectedFiles | ForEach-Object { $_.LocalPath }) -join ';' )
                 Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status $nodeStatus -CollectedAtUtc $collectedAtUtc -ResultFile $resultFiles -ErrorFile '' -ErrorMessage $collect.ErrorOutput
@@ -185,6 +199,7 @@ function Invoke-CollectNodeMetricsMain {
                 }
             }
             catch {
+                $failedDeliveryNodeCount++
                 Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_exception' -CollectedAtUtc ((Get-Date).ToUniversalTime().ToString('o')) -ErrorMessage $_.Exception.Message
                 Write-NodeActionLog -Node $node -Action 'collect_exception' -Detail $_.Exception.Message -Level ERROR
             }
@@ -193,7 +208,8 @@ function Invoke-CollectNodeMetricsMain {
         Write-Progress -Id 2 -Activity 'Collecting node results' -Completed
         Update-ConsoleStatus -Complete
         Complete-MeasurementRun -Config $config -RunId $RunId -ReachableNodes $reachableCount -CollectedNodes $collectedCount -ParsedNodes $parsedCount -Status 'completed'
-        Write-Log -Message "Run summary: total=$($nodes.Count), reachable=$reachableCount, collected_nodes=$collectedCount, collected_files=$collectedFileCount, parsed=$parsedCount"
+        Write-Log -Message "Run summary: total=$($nodes.Count), reachable=$reachableCount, collected_nodes=$collectedCount, collected_files=$collectedFileCount, parsed=$parsedCount, successful_nodes=$successfulDeliveryNodeCount, failed_nodes=$failedDeliveryNodeCount"
+        Write-Host ("Node delivery summary: successful={0}, failed={1}" -f $successfulDeliveryNodeCount, $failedDeliveryNodeCount)
     }
     catch {
         Update-ConsoleStatus -Complete

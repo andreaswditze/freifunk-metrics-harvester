@@ -21,6 +21,91 @@ Describe 'Module entry points' {
     }
 }
 
+Describe 'Invoke-CollectNodeMetricsMain' {
+    It 'prints a final delivery summary for successful and failed nodes' {
+        InModuleScope FreifunkMetrics {
+            $baseDir = Join-Path $TestDrive 'runner-main'
+            $nodeSuccess = [pscustomobject]@{ DeviceID = 'node-001'; Name = 'Node 1'; IP = '2a03:2260::1'; Domain = 'dom-a' }
+            $nodeFailedResult = [pscustomobject]@{ DeviceID = 'node-002'; Name = 'Node 2'; IP = '2a03:2260::2'; Domain = 'dom-b' }
+            $nodeTriggerFailed = [pscustomobject]@{ DeviceID = 'node-003'; Name = 'Node 3'; IP = '2a03:2260::3'; Domain = 'dom-c' }
+
+            $config = @{
+                ConfigPath = 'test-config.ps1'
+                ScriptBaseDir = $baseDir
+                RawResultBaseDir = (Join-Path $baseDir 'raw')
+                LogDir = (Join-Path $baseDir 'log')
+                TempDir = (Join-Path $baseDir 'temp')
+                DatabasePath = (Join-Path $baseDir 'metrics.db')
+                LogFilePrefix = 'collect-node-metrics'
+                ExcelInputFiles = @()
+                ExcelInputDirectories = @()
+                ExcelSearchRecurse = $false
+                UseTestNodeIPs = $false
+                TestNodeIPs = @()
+                TriggerParallelism = 2
+                CollectParallelism = 2
+                TriggerRandomDelayMaxSeconds = 0
+                SpeedtestTargetBytes = 104857600
+            }
+
+            $successFile = [pscustomobject]@{
+                LocalPath = 'success.txt'
+                RawOutput = 'speedtest,nodeid=aa download_mbit=10.5,target="https://example.invalid/test.bin" 1772839860'
+                ParsedMeasurement = [pscustomobject]@{ ResultType = 'success'; NodeId = 'aa'; ThroughputMbit = 10.5 }
+            }
+            $failedFile = [pscustomobject]@{
+                LocalPath = 'failed.txt'
+                RawOutput = 'wget_failed,nodeid=bb exit=4 bytes=0 expected_bytes=104857600 target="https://example.invalid/test.bin" 1772839860'
+                ParsedMeasurement = [pscustomobject]@{ ResultType = 'final_failed'; NodeId = 'bb'; FailureReason = 'wget_failed'; ThroughputMbit = 0 }
+            }
+
+            Mock Show-StartupBanner {}
+            Mock Update-ConsoleStatus {}
+            Mock Write-Progress {}
+            Mock Write-Host {}
+            Mock Write-Log {}
+            Mock Initialize-Database {}
+            Mock Get-EnvironmentConfig { $config }
+            Mock Import-NodeListFromExcel { [pscustomobject]@{ Nodes = @($nodeSuccess, $nodeFailedResult, $nodeTriggerFailed); SourceFiles = @('nodes.csv') } }
+            Mock Start-MeasurementRun { [pscustomobject]@{ RawDir = (Join-Path $TestDrive 'raw-run') } }
+            Mock Write-NodeActionLog {}
+            Mock Add-NodeJobRecord {}
+            Mock Wait-WithProgress {}
+            Mock Save-Measurement {}
+            Mock Complete-MeasurementRun {}
+            Mock Invoke-NodeTriggerBatch {
+                @(
+                    [pscustomobject]@{ Node = $nodeSuccess; TriggerResult = [pscustomobject]@{ Triggered = $true; RemoteResultFile = '/tmp/node-001.txt'; RemoteErrorFile = '/tmp/node-001.err'; AssignedDelaySeconds = 0 } }
+                    [pscustomobject]@{ Node = $nodeFailedResult; TriggerResult = [pscustomobject]@{ Triggered = $true; RemoteResultFile = '/tmp/node-002.txt'; RemoteErrorFile = '/tmp/node-002.err'; AssignedDelaySeconds = 0 } }
+                    [pscustomobject]@{ Node = $nodeTriggerFailed; TriggerResult = [pscustomobject]@{ Triggered = $false; Error = 'ssh failed' } }
+                )
+            }
+            Mock Invoke-NodeCollectBatch {
+                @(
+                    [pscustomobject]@{ Node = $nodeSuccess; CollectResult = [pscustomobject]@{ Success = $true; ErrorOutput = ''; Files = @($successFile); PendingFiles = @() } }
+                    [pscustomobject]@{ Node = $nodeFailedResult; CollectResult = [pscustomobject]@{ Success = $true; ErrorOutput = ''; Files = @($failedFile); PendingFiles = @() } }
+                )
+            }
+
+            try {
+                Invoke-CollectNodeMetricsMain -RunId 'run-summary'
+
+                Assert-MockCalled Complete-MeasurementRun -Times 1 -Exactly -ParameterFilter { $ReachableNodes -eq 2 -and $CollectedNodes -eq 2 -and $ParsedNodes -eq 2 -and $Status -eq 'completed' }
+                Assert-MockCalled Write-Log -Times 1 -ParameterFilter { $Message -eq 'Run summary: total=3, reachable=2, collected_nodes=2, collected_files=2, parsed=2, successful_nodes=1, failed_nodes=2' }
+                Assert-MockCalled Write-Host -Times 1 -Exactly -ParameterFilter { $Object -eq 'Node delivery summary: successful=1, failed=2' }
+            }
+            finally {
+                $script:CurrentConfig = $null
+                $script:LogFilePath = $null
+                $script:DailyLogDir = $null
+                $script:DailyLogFilePath = $null
+                $script:ConsoleStatusLength = 0
+                $script:ConsoleBannerShown = $false
+            }
+        }
+    }
+}
+
 Describe 'ConvertFrom-MeasurementOutput' {
     It 'parses valid line protocol' {
         $raw = 'speedtest,nodeid=001122334455 download_mbit=87.32,target="https://fsn1-speed.hetzner.com/100MB.bin" 1731000000000000000'
