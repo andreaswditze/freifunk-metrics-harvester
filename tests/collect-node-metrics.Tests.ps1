@@ -62,11 +62,11 @@ Describe 'Invoke-CollectNodeMetricsMain' {
             Mock Show-StartupBanner {}
             Mock Update-ConsoleStatus {}
             Mock Write-Progress {}
-            $hostMessages = New-Object System.Collections.Generic.List[string]
+            $script:HostMessages = New-Object System.Collections.Generic.List[string]
             Mock Write-Host {
                 param($Object)
 
-                $hostMessages.Add([string]$Object)
+                $script:HostMessages.Add([string]$Object)
             }
             Mock Write-Log {}
             Mock Initialize-Database {}
@@ -97,12 +97,12 @@ Describe 'Invoke-CollectNodeMetricsMain' {
 
                 Assert-MockCalled Complete-MeasurementRun -Times 1 -Exactly -ParameterFilter { $ReachableNodes -eq 2 -and $CollectedNodes -eq 2 -and $ParsedNodes -eq 2 -and $Status -eq 'completed' }
                 Assert-MockCalled Write-Log -Times 1 -ParameterFilter { $Message -eq 'Run summary: total=3, reachable=2, collected_nodes=2, collected_files=2, parsed=2, successful_nodes=1, failed_nodes=2' }
-                @($hostMessages) | Should -Contain 'Node delivery summary: successful=1, failed=2'
-                @($hostMessages | Where-Object { $_ -like 'Failed node reasons:*' }) | Should -HaveCount 1
-                @($hostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'download_failed=1'
-                @($hostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'not_reachable=1'
-                @($hostMessages) | Should -Contain ' - Node 2 (2a03:2260::2): download_failed [final; wget_failed]'
-                @($hostMessages) | Should -Contain ' - Node 3 (2a03:2260::3): not_reachable [trigger; ssh failed]'
+                @($script:HostMessages) | Should -Contain 'Node delivery summary: successful=1, failed=2'
+                @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' }) | Should -HaveCount 1
+                @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'download_failed=1'
+                @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'not_reachable=1'
+                @($script:HostMessages) | Should -Contain ' - Node 2 (2a03:2260::2): download_failed [final; wget_failed]'
+                @($script:HostMessages) | Should -Contain ' - Node 3 (2a03:2260::3): not_reachable [trigger; ssh failed]'
             }
             finally {
                 $script:CurrentConfig = $null
@@ -111,6 +111,7 @@ Describe 'Invoke-CollectNodeMetricsMain' {
                 $script:DailyLogFilePath = $null
                 $script:ConsoleStatusLength = 0
                 $script:ConsoleBannerShown = $false
+                $script:HostMessages = $null
             }
         }
     }
