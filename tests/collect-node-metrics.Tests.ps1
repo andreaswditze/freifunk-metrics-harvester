@@ -184,6 +184,8 @@ Describe 'Wait-WithProgress' {
             Assert-MockCalled Start-NodeResultCountPoll -Times 1 -Exactly
             Assert-MockCalled Start-Sleep -Times 3 -Exactly
             Assert-MockCalled Stop-NodeResultCountPoll -Times 1 -Exactly
+            Assert-MockCalled Update-ConsoleStatus -Times 4 -ParameterFilter { $Message -match 'finished pending/1 nodes' }
+
             Assert-MockCalled Update-ConsoleStatus -Times 4
         }
     }

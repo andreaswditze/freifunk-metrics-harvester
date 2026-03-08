@@ -188,9 +188,10 @@ function Wait-WithProgress {
                 $pollJob = $null
             }
 
-            if ($nodeCount -gt 0 -and $finishedCount -ge 0) {
-                $status = 'Remaining: {0}s | finished: {1}/{2}' -f $remaining, $finishedCount, $nodeCount
-                Update-ConsoleStatus -Message ('Wait {0}/{1}s: finished {2}/{3} nodes' -f $elapsed, $Seconds, $finishedCount, $nodeCount)
+            if ($nodeCount -gt 0) {
+                $finishedLabel = if ($finishedCount -ge 0) { $finishedCount } else { 'pending' }
+                $status = 'Remaining: {0}s | finished: {1}/{2}' -f $remaining, $finishedLabel, $nodeCount
+                Update-ConsoleStatus -Message ('Wait {0}/{1}s: finished {2}/{3} nodes' -f $elapsed, $Seconds, $finishedLabel, $nodeCount)
             }
             else {
                 $status = 'Remaining: {0}s' -f $remaining
