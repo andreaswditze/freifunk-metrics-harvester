@@ -68,8 +68,8 @@ function Add-NodeFailureRecord {
 function Format-NodeFailureSummary {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]
-        [object[]]$Failures
+        [AllowEmptyCollection()]
+        [object[]]$Failures = @()
     )
 
     if (@($Failures).Count -eq 0) {
@@ -331,3 +331,4 @@ function Invoke-CollectNodeMetricsMain {
         exit 1
     }
 }
+
