@@ -68,7 +68,15 @@ Describe 'Invoke-CollectNodeMetricsMain' {
 
                 $script:HostMessages.Add([string]$Object)
             }
-            Mock Write-Log {}
+            $script:LogMessages = New-Object System.Collections.Generic.List[string]
+            Mock Write-Log {
+                param([string]$Message, [string]$Level = 'INFO')
+
+                $script:LogMessages.Add($Level + '|' + $Message)
+                if ($Level -eq 'ERROR') {
+                    throw ('Runner error: ' + $Message)
+                }
+            }
             Mock Initialize-Database {}
             Mock Get-EnvironmentConfig { $config }
             Mock Import-NodeListFromExcel { [pscustomobject]@{ Nodes = @($nodeSuccess, $nodeFailedResult, $nodeTriggerFailed); SourceFiles = @('nodes.csv') } }
@@ -117,6 +125,7 @@ Describe 'Invoke-CollectNodeMetricsMain' {
                 $script:ConsoleStatusLength = 0
                 $script:ConsoleBannerShown = $false
                 $script:HostMessages = $null
+                $script:LogMessages = $null
             }
         }
     }
