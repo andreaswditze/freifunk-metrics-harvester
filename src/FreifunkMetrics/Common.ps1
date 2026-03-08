@@ -172,17 +172,23 @@ function Receive-NodeResultCountPoll {
     )
 
     try {
-        $result = @(Receive-Job -Job $Job -ErrorAction Stop)
+        $result = @(Receive-Job -Job $Job)
         if ($result.Count -eq 0) {
             return $null
         }
 
         $pollResult = $result[-1]
-        if ($null -eq $pollResult -or -not ($pollResult.PSObject.Properties.Name -contains 'PendingNodeKeys')) {
+        if ($null -eq $pollResult) {
             return $null
         }
 
-        return $pollResult
+        if ($pollResult.PSObject.Properties.Name -contains 'PendingNodeKeys') {
+            return $pollResult
+        }
+
+        return [pscustomobject]@{
+            PendingNodeKeys = @($result)
+        }
     }
     catch {
         return $null
