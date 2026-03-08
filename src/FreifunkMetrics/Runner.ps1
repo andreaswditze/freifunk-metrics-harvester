@@ -330,7 +330,7 @@ function Invoke-CollectNodeMetricsMain {
         }
 
         Write-Log -Level ERROR -Message "Fatal error: $($_.Exception.Message)"
-        exit 1
+        throw
     }
 }
 

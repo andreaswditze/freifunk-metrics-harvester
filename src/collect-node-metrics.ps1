@@ -19,8 +19,11 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'FreifunkMetrics.psm1') -Force | Out-Null
 
 if (-not $NoRun) {
-    Invoke-CollectNodeMetricsMain -ConfigPath $ConfigPath -RunId $RunId -VerboseLogging:$VerboseLogging
+    try {
+        Invoke-CollectNodeMetricsMain -ConfigPath $ConfigPath -RunId $RunId -VerboseLogging:$VerboseLogging
+    }
+    catch {
+        Write-Error $_
+        exit 1
+    }
 }
-
-
-
