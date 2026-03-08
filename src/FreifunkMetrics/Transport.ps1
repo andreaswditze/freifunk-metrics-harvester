@@ -367,7 +367,8 @@ function Invoke-NodeTriggerBatch {
                     AssignedDelaySeconds = $_.AssignedDelaySeconds
                     TriggerInfo          = (Get-NodeTriggerCommandInfo -Config $Config -RunId $RunId -AssignedDelaySeconds $_.AssignedDelaySeconds)
                 }
-            }
+            } |
+            Sort-Object @{ Expression = { $_.AssignedDelaySeconds } }, @{ Expression = { $_.Index } }
     )
 
     $parallelism = [Math]::Max(1, [int]$Config.TriggerParallelism)

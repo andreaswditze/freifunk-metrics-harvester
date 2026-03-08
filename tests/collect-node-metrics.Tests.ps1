@@ -243,6 +243,55 @@ Describe 'Get-NodeTriggerAssignments' {
         }
     }
 }
+Describe 'Invoke-NodeTriggerBatch' {
+    It 'triggers lower assigned delays first' {
+        InModuleScope FreifunkMetrics {
+            $config = @{ TriggerParallelism = 1 }
+            $nodes = @(
+                [pscustomobject]@{ DeviceID = 'node-001'; Name = 'Node 1'; IP = '2a03:2260::1'; Domain = 'dom-a' }
+                [pscustomobject]@{ DeviceID = 'node-002'; Name = 'Node 2'; IP = '2a03:2260::2'; Domain = 'dom-a' }
+                [pscustomobject]@{ DeviceID = 'node-003'; Name = 'Node 3'; IP = '2a03:2260::3'; Domain = 'dom-a' }
+            )
+
+            Mock Get-NodeTriggerAssignments {
+                @(
+                    [pscustomobject]@{ Index = 2; Node = $nodes[2]; AssignedDelaySeconds = 10 }
+                    [pscustomobject]@{ Index = 0; Node = $nodes[0]; AssignedDelaySeconds = 0 }
+                    [pscustomobject]@{ Index = 1; Node = $nodes[1]; AssignedDelaySeconds = 5 }
+                )
+            }
+
+            Mock Get-NodeTriggerCommandInfo {
+                param($Config, $RunId, $AssignedDelaySeconds)
+
+                [pscustomobject]@{
+                    RemoteResultFile     = ''
+                    RemoteErrorFile      = ''
+                    TriggerCommand       = ''
+                    AssignedDelaySeconds = $AssignedDelaySeconds
+                }
+            }
+
+            Mock Invoke-NodeTriggerCommand {
+                param($Config, $Node, $RunId, $AssignedDelaySeconds)
+
+                [pscustomobject]@{
+                    Reachable            = $true
+                    Triggered            = $true
+                    RemoteResultFile     = ''
+                    RemoteErrorFile      = ''
+                    AssignedDelaySeconds = $AssignedDelaySeconds
+                    Error                = ''
+                }
+            }
+
+            $result = @(Invoke-NodeTriggerBatch -Config $config -Nodes $nodes -RunId 'run-a')
+
+            @($result | ForEach-Object { $_.Node.DeviceID }) | Should -Be @('node-001', 'node-002', 'node-003')
+            @($result | ForEach-Object { $_.TriggerResult.AssignedDelaySeconds }) | Should -Be @(0, 5, 10)
+        }
+    }
+}
 Describe 'Get-NodeTriggerCommandInfo' {
     It 'uses controller-assigned delay and target settings' {
         $config = @{
