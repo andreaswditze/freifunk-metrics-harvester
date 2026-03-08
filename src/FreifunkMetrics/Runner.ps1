@@ -1,6 +1,99 @@
 # Functions for this concern are loaded by FreifunkMetrics.psm1.
 
+function Get-NodeFailureCategory {
+    [CmdletBinding()]
+    param(
+        [string]$Stage,
+        [string]$Detail
+    )
 
+    $normalizedDetail = ([string]$Detail).ToLowerInvariant()
+
+    if ($Stage -eq 'trigger') {
+        if ($normalizedDetail -match 'timed out|timeout|no route to host|network is unreachable|could not resolve|host key verification failed|connection refused|ssh failed') {
+            return 'not_reachable'
+        }
+
+        return 'trigger_failed'
+    }
+
+    if ($Stage -eq 'collect') {
+        if ($normalizedDetail -match 'pending_files=') {
+            return 'download_pending'
+        }
+
+        if ($normalizedDetail -match 'no files found') {
+            return 'no_result_file'
+        }
+
+        if ($normalizedDetail -match 'permission denied|scp|download|copy|collect failed|delete failed|cleanup failed') {
+            return 'download_failed'
+        }
+
+        return 'collect_failed'
+    }
+
+    if ($Stage -eq 'final') {
+        switch ($normalizedDetail) {
+            'wget_failed' { return 'download_failed' }
+            'speedtest_invalid' { return 'invalid_result' }
+            'speedtest_size_mismatch' { return 'size_mismatch' }
+            default { return 'final_failed' }
+        }
+    }
+
+    return 'unknown_failure'
+}
+
+function Add-NodeFailureRecord {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Collections.Generic.List[object]]$Failures,
+        [Parameter(Mandatory = $true)]
+        [object]$Node,
+        [Parameter(Mandatory = $true)]
+        [string]$Stage,
+        [string]$Detail
+    )
+
+    $Failures.Add([pscustomobject]@{
+            Node     = $Node
+            Stage    = $Stage
+            Category = (Get-NodeFailureCategory -Stage $Stage -Detail $Detail)
+            Detail   = (Convert-ToTrimmedString -Value $Detail)
+        })
+}
+
+function Format-NodeFailureSummary {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]]$Failures
+    )
+
+    if (@($Failures).Count -eq 0) {
+        return @()
+    }
+
+    $categorySummary = @(
+        $Failures |
+            Group-Object -Property Category |
+            Sort-Object Name |
+            ForEach-Object { '{0}={1}' -f $_.Name, $_.Count }
+    )
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('Failed node reasons: ' + ($categorySummary -join ', '))
+
+    foreach ($failure in $Failures) {
+        $label = if ([string]::IsNullOrWhiteSpace($failure.Node.Name)) { $failure.Node.IP } else { '{0} ({1})' -f $failure.Node.Name, $failure.Node.IP }
+        $detail = if ([string]::IsNullOrWhiteSpace($failure.Detail)) { $failure.Stage } else { '{0}; {1}' -f $failure.Stage, $failure.Detail }
+        $lines.Add(' - {0}: {1} [{2}]' -f $label, $failure.Category, $detail)
+    }
+
+    return @($lines)
+}
 
 function Invoke-CollectNodeMetricsMain {
     [CmdletBinding()]
@@ -68,6 +161,7 @@ function Invoke-CollectNodeMetricsMain {
         $runInfo = Start-MeasurementRun -Config $config -RunId $RunId -SourceFiles $importResult.SourceFiles -TotalNodes $nodes.Count
 
         $triggeredNodes = New-Object System.Collections.Generic.List[object]
+        $failedNodes = New-Object System.Collections.Generic.List[object]
         $reachableCount = 0
         $successfulDeliveryNodeCount = 0
         $failedDeliveryNodeCount = 0
@@ -97,12 +191,14 @@ function Invoke-CollectNodeMetricsMain {
                 }
                 else {
                     $failedDeliveryNodeCount++
+                    Add-NodeFailureRecord -Failures $failedNodes -Node $node -Stage 'trigger' -Detail $triggerResult.Error
                     Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'trigger_failed' -TriggeredAtUtc $triggeredAtUtc -ErrorMessage $triggerResult.Error
                     Write-NodeActionLog -Node $node -Action 'trigger_failed' -Detail $triggerResult.Error -Level WARN
                 }
             }
             catch {
                 $failedDeliveryNodeCount++
+                Add-NodeFailureRecord -Failures $failedNodes -Node $node -Stage 'trigger' -Detail $_.Exception.Message
                 Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'trigger_exception' -TriggeredAtUtc ((Get-Date).ToUniversalTime().ToString('o')) -ErrorMessage $_.Exception.Message
                 Write-NodeActionLog -Node $node -Action 'trigger_exception' -Detail $_.Exception.Message -Level ERROR
             }
@@ -136,6 +232,7 @@ function Invoke-CollectNodeMetricsMain {
 
                 if (-not $collect.Success) {
                     $failedDeliveryNodeCount++
+                    Add-NodeFailureRecord -Failures $failedNodes -Node $node -Stage 'collect' -Detail $collect.ErrorOutput
                     Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_failed' -CollectedAtUtc $collectedAtUtc -ErrorMessage $collect.ErrorOutput
                     Write-NodeActionLog -Node $node -Action 'collect_failed' -Detail $collect.ErrorOutput -Level WARN
                     continue
@@ -146,6 +243,7 @@ function Invoke-CollectNodeMetricsMain {
 
                 if ($pendingFiles.Count -gt 0) {
                     $pendingSummary = 'pending_files=' + $pendingFiles.Count + '; first_file=' + $pendingFiles[0].LocalPath + '; raw_size=' + $pendingFiles[0].RawSize
+                    Add-NodeFailureRecord -Failures $failedNodes -Node $node -Stage 'collect' -Detail $pendingSummary
                     Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_pending' -CollectedAtUtc $collectedAtUtc -ResultFile ((@($pendingFiles | ForEach-Object { $_.LocalPath }) -join ';' ) ) -ErrorMessage $pendingSummary
                     Write-NodeActionLog -Node $node -Action 'collect_pending' -Detail $pendingSummary -Level WARN
                 }
@@ -158,6 +256,7 @@ function Invoke-CollectNodeMetricsMain {
 
                     $emptyMessage = 'no files found in remote harvester dir'
                     $failedDeliveryNodeCount++
+                    Add-NodeFailureRecord -Failures $failedNodes -Node $node -Stage 'collect' -Detail $emptyMessage
                     Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collected_empty' -CollectedAtUtc $collectedAtUtc -ErrorMessage $emptyMessage
                     Write-NodeActionLog -Node $node -Action 'collect_empty' -Detail $emptyMessage -Level WARN
                     continue
@@ -175,6 +274,8 @@ function Invoke-CollectNodeMetricsMain {
                 }
                 else {
                     $failedDeliveryNodeCount++
+                    $failureReason = if ($failedFiles.Count -gt 0) { @($failedFiles | ForEach-Object { $_.ParsedMeasurement.FailureReason } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)[0] } else { '' }
+                    Add-NodeFailureRecord -Failures $failedNodes -Node $node -Stage 'final' -Detail $failureReason
                 }
 
                 $resultFiles = (@($collectedFiles | ForEach-Object { $_.LocalPath }) -join ';' )
@@ -200,6 +301,7 @@ function Invoke-CollectNodeMetricsMain {
             }
             catch {
                 $failedDeliveryNodeCount++
+                Add-NodeFailureRecord -Failures $failedNodes -Node $node -Stage 'collect' -Detail $_.Exception.Message
                 Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_exception' -CollectedAtUtc ((Get-Date).ToUniversalTime().ToString('o')) -ErrorMessage $_.Exception.Message
                 Write-NodeActionLog -Node $node -Action 'collect_exception' -Detail $_.Exception.Message -Level ERROR
             }
@@ -210,6 +312,9 @@ function Invoke-CollectNodeMetricsMain {
         Complete-MeasurementRun -Config $config -RunId $RunId -ReachableNodes $reachableCount -CollectedNodes $collectedCount -ParsedNodes $parsedCount -Status 'completed'
         Write-Log -Message "Run summary: total=$($nodes.Count), reachable=$reachableCount, collected_nodes=$collectedCount, collected_files=$collectedFileCount, parsed=$parsedCount, successful_nodes=$successfulDeliveryNodeCount, failed_nodes=$failedDeliveryNodeCount"
         Write-Host ("Node delivery summary: successful={0}, failed={1}" -f $successfulDeliveryNodeCount, $failedDeliveryNodeCount)
+        foreach ($failureLine in Format-NodeFailureSummary -Failures @($failedNodes.ToArray())) {
+            Write-Host $failureLine
+        }
     }
     catch {
         Update-ConsoleStatus -Complete
