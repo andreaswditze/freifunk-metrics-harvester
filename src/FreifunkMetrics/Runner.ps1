@@ -81,16 +81,16 @@ function Format-NodeFailureSummary {
         $Failures |
             Group-Object -Property Category |
             Sort-Object Name |
-            ForEach-Object { '{0}={1}' -f $_.Name, $_.Count }
+            ForEach-Object { [string]$_.Name + '=' + [string]$_.Count }
     )
 
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add('Failed node reasons: ' + ($categorySummary -join ', '))
 
     foreach ($failure in $Failures) {
-        $label = if ([string]::IsNullOrWhiteSpace($failure.Node.Name)) { $failure.Node.IP } else { '{0} ({1})' -f $failure.Node.Name, $failure.Node.IP }
-        $detail = if ([string]::IsNullOrWhiteSpace($failure.Detail)) { $failure.Stage } else { '{0}; {1}' -f $failure.Stage, $failure.Detail }
-        $lines.Add(' - {0}: {1} [{2}]' -f $label, $failure.Category, $detail)
+        $label = if ([string]::IsNullOrWhiteSpace($failure.Node.Name)) { [string]$failure.Node.IP } else { ([string]$failure.Node.Name + ' (' + [string]$failure.Node.IP + ')') }
+        $detail = if ([string]::IsNullOrWhiteSpace($failure.Detail)) { [string]$failure.Stage } else { ([string]$failure.Stage + '; ' + [string]$failure.Detail) }
+        $lines.Add(' - ' + $label + ': ' + [string]$failure.Category + ' [' + $detail + ']')
     }
 
     return @($lines)
@@ -334,4 +334,3 @@ function Invoke-CollectNodeMetricsMain {
         throw
     }
 }
-
