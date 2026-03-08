@@ -76,9 +76,6 @@ try {
     if ($RunSshStreaming) {
         $invokeParams['TagFilter'] = @('ssh-streaming')
     }
-    elseif (-not $IncludeIntegration) {
-        $invokeParams['ExcludeTagFilter'] = @('integration')
-    }
 
     Invoke-Pester @invokeParams
 }
@@ -90,3 +87,4 @@ finally {
         $env:FFMH_TEST_CONFIG_PATH = $previousConfigPath
     }
 }
+
