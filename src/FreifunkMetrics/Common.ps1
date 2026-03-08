@@ -89,15 +89,19 @@ function Start-NodeResultCountPoll {
         param($PollConfig, $PollRunId, $PollNodes, $ModulePath)
 
         Import-Module $ModulePath -Force | Out-Null
-        Get-FinishedNodeResultCountBatch -Config $PollConfig -RunId $PollRunId -Nodes $PollNodes
+
+        $finished = 0
+        foreach ($pollNode in @($PollNodes)) {
+            if (Test-NodeResultFinished -Config $PollConfig -RunId $PollRunId -Node $pollNode) {
+                $finished++
+            }
+        }
+
+        $finished
     }
 
     $pollConfig = @{} + $Config
     $jobArgs = @($pollConfig, $RunId, @($Nodes), $script:ModuleFilePath)
-    if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
-        return Start-ThreadJob -ScriptBlock $jobScript -ArgumentList $jobArgs
-    }
-
     return Start-Job -ScriptBlock $jobScript -ArgumentList $jobArgs
 }
 
