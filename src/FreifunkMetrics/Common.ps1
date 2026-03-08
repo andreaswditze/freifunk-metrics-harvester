@@ -84,11 +84,12 @@ function Get-NodeProgressKey {
         [object]$Node
     )
 
+    $properties = $Node.PSObject.Properties
     return @(
-        Convert-ToTrimmedString -Value $Node.DeviceID
-        Convert-ToTrimmedString -Value $Node.IP
-        Convert-ToTrimmedString -Value $Node.Name
-        Convert-ToTrimmedString -Value $Node.Domain
+        Convert-ToTrimmedString -Value $(if ($null -ne $properties['DeviceID']) { $properties['DeviceID'].Value })
+        Convert-ToTrimmedString -Value $(if ($null -ne $properties['IP']) { $properties['IP'].Value })
+        Convert-ToTrimmedString -Value $(if ($null -ne $properties['Name']) { $properties['Name'].Value })
+        Convert-ToTrimmedString -Value $(if ($null -ne $properties['Domain']) { $properties['Domain'].Value })
     ) -join '|'
 }
 
