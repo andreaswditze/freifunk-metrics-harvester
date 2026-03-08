@@ -62,7 +62,12 @@ Describe 'Invoke-CollectNodeMetricsMain' {
             Mock Show-StartupBanner {}
             Mock Update-ConsoleStatus {}
             Mock Write-Progress {}
-            Mock Write-Host {}
+            $hostMessages = New-Object System.Collections.Generic.List[string]
+            Mock Write-Host {
+                param($Object)
+
+                $hostMessages.Add([string]$Object)
+            }
             Mock Write-Log {}
             Mock Initialize-Database {}
             Mock Get-EnvironmentConfig { $config }
@@ -92,10 +97,12 @@ Describe 'Invoke-CollectNodeMetricsMain' {
 
                 Assert-MockCalled Complete-MeasurementRun -Times 1 -Exactly -ParameterFilter { $ReachableNodes -eq 2 -and $CollectedNodes -eq 2 -and $ParsedNodes -eq 2 -and $Status -eq 'completed' }
                 Assert-MockCalled Write-Log -Times 1 -ParameterFilter { $Message -eq 'Run summary: total=3, reachable=2, collected_nodes=2, collected_files=2, parsed=2, successful_nodes=1, failed_nodes=2' }
-                Assert-MockCalled Write-Host -Times 1 -ParameterFilter { $Object -eq 'Node delivery summary: successful=1, failed=2' }
-                Assert-MockCalled Write-Host -Times 1 -ParameterFilter { $Object -eq 'Failed node reasons: download_failed=1, not_reachable=1' }
-                Assert-MockCalled Write-Host -Times 1 -ParameterFilter { $Object -eq ' - Node 2 (2a03:2260::2): download_failed [final; wget_failed]' }
-                Assert-MockCalled Write-Host -Times 1 -ParameterFilter { $Object -eq ' - Node 3 (2a03:2260::3): not_reachable [trigger; ssh failed]' }
+                @($hostMessages) | Should -Contain 'Node delivery summary: successful=1, failed=2'
+                @($hostMessages | Where-Object { $_ -like 'Failed node reasons:*' }) | Should -HaveCount 1
+                @($hostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'download_failed=1'
+                @($hostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'not_reachable=1'
+                @($hostMessages) | Should -Contain ' - Node 2 (2a03:2260::2): download_failed [final; wget_failed]'
+                @($hostMessages) | Should -Contain ' - Node 3 (2a03:2260::3): not_reachable [trigger; ssh failed]'
             }
             finally {
                 $script:CurrentConfig = $null
