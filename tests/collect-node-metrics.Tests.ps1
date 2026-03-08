@@ -137,15 +137,54 @@ Describe 'Wait-WithProgress' {
                 [pscustomobject]@{ DeviceID = 'node-002'; IP = '2a03:2260::2' }
             )
 
-            Mock Get-FinishedNodeResultCountBatch { 2 }
+            Mock Get-Date { [datetime]'2026-03-08T12:00:00Z' }
+            Mock Start-NodeResultCountPoll { [pscustomobject]@{ State = 'Completed' } }
+            Mock Receive-NodeResultCountPoll { 2 }
+            Mock Stop-NodeResultCountPoll {}
             Mock Start-Sleep {}
             Mock Write-Progress {}
             Mock Update-ConsoleStatus {}
 
             Wait-WithProgress -Seconds 30 -Config @{} -RunId 'run-a' -Nodes $nodes -PollIntervalSeconds 1
 
-            Assert-MockCalled Get-FinishedNodeResultCountBatch -Times 1 -Exactly
+            Assert-MockCalled Start-NodeResultCountPoll -Times 1 -Exactly
+            Assert-MockCalled Receive-NodeResultCountPoll -Times 1 -Exactly
             Assert-MockCalled Start-Sleep -Times 0 -Exactly
+        }
+    }
+
+    It 'keeps updating elapsed time while the poll is still running' {
+        InModuleScope FreifunkMetrics {
+            $nodes = @(
+                [pscustomobject]@{ DeviceID = 'node-001'; IP = '2a03:2260::1' }
+            )
+            $timestamps = @(
+                [datetime]'2026-03-08T12:00:00Z'
+                [datetime]'2026-03-08T12:00:00Z'
+                [datetime]'2026-03-08T12:00:01Z'
+                [datetime]'2026-03-08T12:00:02Z'
+                [datetime]'2026-03-08T12:00:03Z'
+            )
+            $script:dateIndex = 0
+
+            Mock Get-Date {
+                $current = $timestamps[[Math]::Min($script:dateIndex, $timestamps.Count - 1)]
+                $script:dateIndex++
+                $current
+            }
+            Mock Start-NodeResultCountPoll { [pscustomobject]@{ State = 'Running' } }
+            Mock Receive-NodeResultCountPoll { throw 'should not be called' }
+            Mock Stop-NodeResultCountPoll {}
+            Mock Start-Sleep {}
+            Mock Write-Progress {}
+            Mock Update-ConsoleStatus {}
+
+            Wait-WithProgress -Seconds 3 -Config @{} -RunId 'run-a' -Nodes $nodes -PollIntervalSeconds 1
+
+            Assert-MockCalled Start-NodeResultCountPoll -Times 1 -Exactly
+            Assert-MockCalled Start-Sleep -Times 3 -Exactly
+            Assert-MockCalled Stop-NodeResultCountPoll -Times 1 -Exactly
+            Assert-MockCalled Update-ConsoleStatus -Times 4
         }
     }
 }
@@ -692,3 +731,4 @@ Describe 'Invoke-NodeCollectBatch' {
         @($sorted[1].CollectResult.Files).Count | Should -Be 1
     }
 }
+

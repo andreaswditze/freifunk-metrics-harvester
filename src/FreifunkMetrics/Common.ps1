@@ -77,6 +77,74 @@ function Write-NodeActionLog {
     Write-Log -Level $Level -Message $message
 }
 
+function Start-NodeResultCountPoll {
+    [CmdletBinding()]
+    param(
+        [hashtable]$Config = @{},
+        [string]$RunId = '',
+        [object[]]$Nodes = @()
+    )
+
+    $jobScript = {
+        param($PollConfig, $PollRunId, $PollNodes, $ModulePath)
+
+        Import-Module $ModulePath -Force | Out-Null
+        Get-FinishedNodeResultCountBatch -Config $PollConfig -RunId $PollRunId -Nodes $PollNodes
+    }
+
+    $pollConfig = @{} + $Config
+    $jobArgs = @($pollConfig, $RunId, @($Nodes), $script:ModuleFilePath)
+    if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
+        return Start-ThreadJob -ScriptBlock $jobScript -ArgumentList $jobArgs
+    }
+
+    return Start-Job -ScriptBlock $jobScript -ArgumentList $jobArgs
+}
+
+function Receive-NodeResultCountPoll {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Job
+    )
+
+    try {
+        $result = @(Receive-Job -Job $Job -AutoRemoveJob -ErrorAction Stop)
+        if ($result.Count -eq 0) {
+            return -1
+        }
+
+        return [int]$result[-1]
+    }
+    catch {
+        return -1
+    }
+}
+
+function Stop-NodeResultCountPoll {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [object]$Job
+    )
+
+    if ($null -eq $Job) {
+        return
+    }
+
+    try {
+        Stop-Job -Job $Job -ErrorAction SilentlyContinue | Out-Null
+    }
+    catch {
+    }
+
+    try {
+        Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue | Out-Null
+    }
+    catch {
+    }
+}
+
 function Wait-WithProgress {
     [CmdletBinding()]
     param(
@@ -96,38 +164,52 @@ function Wait-WithProgress {
     $nodeCount = @($Nodes).Count
     $pollInterval = [Math]::Max(1, $PollIntervalSeconds)
     $finishedCount = -1
+    $startedAt = Get-Date
+    $nextPollElapsed = 0
+    $pollJob = $null
 
-    for ($elapsed = 0; $elapsed -lt $Seconds; $elapsed++) {
-        $remaining = $Seconds - $elapsed
-        $percent = [int](($elapsed / [double]$Seconds) * 100)
+    try {
+        while ($true) {
+            $elapsed = [Math]::Min($Seconds, [int][Math]::Floor(((Get-Date) - $startedAt).TotalSeconds))
+            $remaining = [Math]::Max(0, $Seconds - $elapsed)
+            $percent = [int]((($Seconds - $remaining) / [double]$Seconds) * 100)
 
-        if ($nodeCount -gt 0 -and (($elapsed -eq 0) -or (($elapsed % $pollInterval) -eq 0))) {
-            try {
-                $finishedCount = Get-FinishedNodeResultCountBatch -Config $Config -RunId $RunId -Nodes $Nodes
+            if ($nodeCount -gt 0 -and $null -eq $pollJob -and $elapsed -ge $nextPollElapsed) {
+                $pollJob = Start-NodeResultCountPoll -Config $Config -RunId $RunId -Nodes $Nodes
+                $nextPollElapsed = $elapsed + $pollInterval
             }
-            catch {
-                $finishedCount = -1
+
+            if ($null -ne $pollJob -and $pollJob.State -in @('Completed', 'Failed', 'Stopped')) {
+                $finishedCount = Receive-NodeResultCountPoll -Job $pollJob
+                $pollJob = $null
             }
-        }
 
-        if ($nodeCount -gt 0 -and $finishedCount -ge 0) {
-            $status = 'Remaining: {0}s | finished: {1}/{2}' -f $remaining, $finishedCount, $nodeCount
-            Update-ConsoleStatus -Message ('Wait {0}/{1}s: finished {2}/{3} nodes' -f $elapsed, $Seconds, $finishedCount, $nodeCount)
-        }
-        else {
-            $status = 'Remaining: {0}s' -f $remaining
-            Update-ConsoleStatus -Message ('Wait {0}/{1}s' -f $elapsed, $Seconds)
-        }
+            if ($nodeCount -gt 0 -and $finishedCount -ge 0) {
+                $status = 'Remaining: {0}s | finished: {1}/{2}' -f $remaining, $finishedCount, $nodeCount
+                Update-ConsoleStatus -Message ('Wait {0}/{1}s: finished {2}/{3} nodes' -f $elapsed, $Seconds, $finishedCount, $nodeCount)
+            }
+            else {
+                $status = 'Remaining: {0}s' -f $remaining
+                Update-ConsoleStatus -Message ('Wait {0}/{1}s' -f $elapsed, $Seconds)
+            }
 
-        Write-Progress -Activity $Activity -Status $status -PercentComplete $percent
+            Write-Progress -Activity $Activity -Status $status -PercentComplete $percent
 
-        if ($nodeCount -gt 0 -and $finishedCount -ge $nodeCount) {
-            break
+            if ($nodeCount -gt 0 -and $finishedCount -ge $nodeCount) {
+                break
+            }
+
+            if ($elapsed -ge $Seconds) {
+                break
+            }
+
+            Start-Sleep -Seconds 1
         }
-        Start-Sleep -Seconds 1
     }
-
-    Write-Progress -Activity $Activity -Completed
+    finally {
+        Stop-NodeResultCountPoll -Job $pollJob
+        Write-Progress -Activity $Activity -Completed
+    }
 }
 
 function Convert-ToTrimmedString {
@@ -213,3 +295,4 @@ function Convert-NodeTimestampToUtc {
         return ''
     }
 }
+
