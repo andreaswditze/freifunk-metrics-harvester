@@ -48,6 +48,7 @@ function Get-NodeFailureCategory {
 function Add-NodeFailureRecord {
     [CmdletBinding()]
     param(
+        [AllowEmptyCollection()]
         [Parameter(Mandatory = $true)]
         [System.Collections.Generic.List[object]]$Failures,
         [Parameter(Mandatory = $true)]

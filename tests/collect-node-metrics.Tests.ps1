@@ -188,7 +188,7 @@ Describe 'Invoke-CollectNodeMetricsMain' {
                 Invoke-CollectNodeMetricsMain -RunId 'run-success-only'
 
                 @($script:HostMessages) | Should -Contain 'Node delivery summary: successful=2, failed=0'
-                @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' }) | Should -BeEmpty
+                @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' }) | Should -HaveCount 0
             }
             finally {
                 $script:CurrentConfig = $null
