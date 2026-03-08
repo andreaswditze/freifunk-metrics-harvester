@@ -312,8 +312,10 @@ function Invoke-CollectNodeMetricsMain {
         Complete-MeasurementRun -Config $config -RunId $RunId -ReachableNodes $reachableCount -CollectedNodes $collectedCount -ParsedNodes $parsedCount -Status 'completed'
         Write-Log -Message "Run summary: total=$($nodes.Count), reachable=$reachableCount, collected_nodes=$collectedCount, collected_files=$collectedFileCount, parsed=$parsedCount, successful_nodes=$successfulDeliveryNodeCount, failed_nodes=$failedDeliveryNodeCount"
         Write-Host ("Node delivery summary: successful={0}, failed={1}" -f $successfulDeliveryNodeCount, $failedDeliveryNodeCount)
-        foreach ($failureLine in Format-NodeFailureSummary -Failures @($failedNodes.ToArray())) {
-            Write-Host $failureLine
+        if ($failedNodes.Count -gt 0) {
+            foreach ($failureLine in Format-NodeFailureSummary -Failures @($failedNodes.ToArray())) {
+                Write-Host $failureLine
+            }
         }
     }
     catch {

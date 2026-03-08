@@ -68,15 +68,7 @@ Describe 'Invoke-CollectNodeMetricsMain' {
 
                 $script:HostMessages.Add([string]$Object)
             }
-            $script:LogMessages = New-Object System.Collections.Generic.List[string]
-            Mock Write-Log {
-                param([string]$Message, [string]$Level = 'INFO')
-
-                $script:LogMessages.Add($Level + '|' + $Message)
-                if ($Level -eq 'ERROR') {
-                    throw ('Runner error: ' + $Message)
-                }
-            }
+            Mock Write-Log {}
             Mock Initialize-Database {}
             Mock Get-EnvironmentConfig { $config }
             Mock Import-NodeListFromExcel { [pscustomobject]@{ Nodes = @($nodeSuccess, $nodeFailedResult, $nodeTriggerFailed); SourceFiles = @('nodes.csv') } }
@@ -105,17 +97,12 @@ Describe 'Invoke-CollectNodeMetricsMain' {
 
                 Assert-MockCalled Complete-MeasurementRun -Times 1 -Exactly -ParameterFilter { $ReachableNodes -eq 2 -and $CollectedNodes -eq 2 -and $ParsedNodes -eq 2 -and $Status -eq 'completed' }
                 Assert-MockCalled Write-Log -Times 1 -ParameterFilter { $Message -eq 'Run summary: total=3, reachable=2, collected_nodes=2, collected_files=2, parsed=2, successful_nodes=1, failed_nodes=2' }
-                try {
-                    @($script:HostMessages) | Should -Contain 'Node delivery summary: successful=1, failed=2'
-                    @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' }) | Should -HaveCount 1
-                    @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'download_failed=1'
-                    @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'not_reachable=1'
-                    @($script:HostMessages) | Should -Contain ' - Node 2 (2a03:2260::2): download_failed [final; wget_failed]'
-                    @($script:HostMessages) | Should -Contain ' - Node 3 (2a03:2260::3): not_reachable [trigger; ssh failed]'
-                }
-                catch {
-                    throw ('Host messages were: ' + (@($script:HostMessages) -join ' || '))
-                }
+                @($script:HostMessages) | Should -Contain 'Node delivery summary: successful=1, failed=2'
+                @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' }) | Should -HaveCount 1
+                @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'download_failed=1'
+                @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' })[0] | Should -Match 'not_reachable=1'
+                @($script:HostMessages) | Should -Contain ' - Node 2 (2a03:2260::2): download_failed [final; wget_failed]'
+                @($script:HostMessages) | Should -Contain ' - Node 3 (2a03:2260::3): not_reachable [trigger; ssh failed]'
             }
             finally {
                 $script:CurrentConfig = $null
@@ -125,7 +112,92 @@ Describe 'Invoke-CollectNodeMetricsMain' {
                 $script:ConsoleStatusLength = 0
                 $script:ConsoleBannerShown = $false
                 $script:HostMessages = $null
-                $script:LogMessages = $null
+            }
+        }
+    }
+
+    It 'does not print failure reasons when all nodes succeeded' {
+        InModuleScope FreifunkMetrics {
+            $baseDir = Join-Path $TestDrive 'runner-main-success-only'
+            $nodeA = [pscustomobject]@{ DeviceID = 'node-010'; Name = 'Node 10'; IP = '2a03:2260::10'; Domain = 'dom-a' }
+            $nodeB = [pscustomobject]@{ DeviceID = 'node-011'; Name = 'Node 11'; IP = '2a03:2260::11'; Domain = 'dom-b' }
+
+            $config = @{
+                ConfigPath = 'test-config.ps1'
+                ScriptBaseDir = $baseDir
+                RawResultBaseDir = (Join-Path $baseDir 'raw')
+                LogDir = (Join-Path $baseDir 'log')
+                TempDir = (Join-Path $baseDir 'temp')
+                DatabasePath = (Join-Path $baseDir 'metrics.db')
+                LogFilePrefix = 'collect-node-metrics'
+                ExcelInputFiles = @()
+                ExcelInputDirectories = @()
+                ExcelSearchRecurse = $false
+                UseTestNodeIPs = $false
+                TestNodeIPs = @()
+                TriggerParallelism = 2
+                CollectParallelism = 2
+                TriggerRandomDelayMaxSeconds = 0
+                SpeedtestTargetBytes = 104857600
+            }
+
+            $fileA = [pscustomobject]@{
+                LocalPath = 'success-a.txt'
+                RawOutput = 'speedtest,nodeid=aa download_mbit=20.1,target="https://example.invalid/test.bin" 1772839860'
+                ParsedMeasurement = [pscustomobject]@{ ResultType = 'success'; NodeId = 'aa'; ThroughputMbit = 20.1 }
+            }
+            $fileB = [pscustomobject]@{
+                LocalPath = 'success-b.txt'
+                RawOutput = 'speedtest,nodeid=bb download_mbit=22.3,target="https://example.invalid/test.bin" 1772839860'
+                ParsedMeasurement = [pscustomobject]@{ ResultType = 'success'; NodeId = 'bb'; ThroughputMbit = 22.3 }
+            }
+
+            Mock Show-StartupBanner {}
+            Mock Update-ConsoleStatus {}
+            Mock Write-Progress {}
+            $script:HostMessages = New-Object System.Collections.Generic.List[string]
+            Mock Write-Host {
+                param($Object)
+
+                $script:HostMessages.Add([string]$Object)
+            }
+            Mock Write-Log {}
+            Mock Initialize-Database {}
+            Mock Get-EnvironmentConfig { $config }
+            Mock Import-NodeListFromExcel { [pscustomobject]@{ Nodes = @($nodeA, $nodeB); SourceFiles = @('nodes.csv') } }
+            Mock Start-MeasurementRun { [pscustomobject]@{ RawDir = (Join-Path $TestDrive 'raw-run-success-only') } }
+            Mock Write-NodeActionLog {}
+            Mock Add-NodeJobRecord {}
+            Mock Wait-WithProgress {}
+            Mock Save-Measurement {}
+            Mock Complete-MeasurementRun {}
+            Mock Invoke-NodeTriggerBatch {
+                @(
+                    [pscustomobject]@{ Node = $nodeA; TriggerResult = [pscustomobject]@{ Triggered = $true; RemoteResultFile = '/tmp/node-010.txt'; RemoteErrorFile = '/tmp/node-010.err'; AssignedDelaySeconds = 0 } }
+                    [pscustomobject]@{ Node = $nodeB; TriggerResult = [pscustomobject]@{ Triggered = $true; RemoteResultFile = '/tmp/node-011.txt'; RemoteErrorFile = '/tmp/node-011.err'; AssignedDelaySeconds = 0 } }
+                )
+            }
+            Mock Invoke-NodeCollectBatch {
+                @(
+                    [pscustomobject]@{ Node = $nodeA; CollectResult = [pscustomobject]@{ Success = $true; ErrorOutput = ''; Files = @($fileA); PendingFiles = @() } }
+                    [pscustomobject]@{ Node = $nodeB; CollectResult = [pscustomobject]@{ Success = $true; ErrorOutput = ''; Files = @($fileB); PendingFiles = @() } }
+                )
+            }
+
+            try {
+                Invoke-CollectNodeMetricsMain -RunId 'run-success-only'
+
+                @($script:HostMessages) | Should -Contain 'Node delivery summary: successful=2, failed=0'
+                @($script:HostMessages | Where-Object { $_ -like 'Failed node reasons:*' }) | Should -BeEmpty
+            }
+            finally {
+                $script:CurrentConfig = $null
+                $script:LogFilePath = $null
+                $script:DailyLogDir = $null
+                $script:DailyLogFilePath = $null
+                $script:ConsoleStatusLength = 0
+                $script:ConsoleBannerShown = $false
+                $script:HostMessages = $null
             }
         }
     }
