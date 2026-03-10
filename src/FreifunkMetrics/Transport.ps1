@@ -272,9 +272,14 @@ start=`$(date +%s%N)
 wget_exit_file="/tmp/harvester-wget-exit-`$$.txt"
 rm -f "`$wget_exit_file"
 t0=`$(date +%s.%N)
-bytes=`$({ wget -O - -q "`$target_url"; printf '%s' "`$?" > "`$wget_exit_file"; } | wc -c)
+wget -O /dev/null -q "`$target_url"
+printf '%s' "`$?" > "`$wget_exit_file"
 t1=`$(date +%s.%N)
 wget_exit=`$(cat "`$wget_exit_file" 2>/dev/null)
+bytes=0
+if [ "`$wget_exit" = "0" ]; then
+    bytes="$targetBytes"
+fi
 rm -f "`$wget_exit_file"
 awk -v nodeid="`$nodeid" -v start="`$start" -v t0="`$t0" -v t1="`$t1" -v target="`$target_url" -v bytes="`$bytes" -v wget_exit="`$wget_exit" -v expected_bytes="$targetBytes" 'BEGIN{
     sec=t1-t0
