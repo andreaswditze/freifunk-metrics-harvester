@@ -18,6 +18,7 @@ return @{
     TriggerParallelism       = 10
     CollectParallelism       = 10
     TriggerRandomDelayMaxSeconds = 600
+    SpeedtestDownloadTimeoutSeconds = 480
     SpeedtestTargetUrl         = 'https://fsn1-speed.hetzner.com/100MB.bin'
     SpeedtestTargetBytes       = 104857600
     LogFilePrefix            = 'collect-node-metrics-dev'
@@ -35,4 +36,5 @@ return @{
         '2a03:2260:3013:200:1ae8:29ff:fe5c:1ff8'
     )
 }
+
 

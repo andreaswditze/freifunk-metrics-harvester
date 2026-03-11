@@ -346,7 +346,7 @@ function Get-NodeTriggerCommandInfo {
     $targetUrl = Convert-ToTrimmedString -Value $Config.SpeedtestTargetUrl
     $targetUrlShell = Convert-ToShellSingleQuoted -Value $targetUrl
     $targetBytes = [Math]::Max(1, [int64]$Config.SpeedtestTargetBytes)
-    $downloadTimeoutSeconds = if ($Config.ContainsKey('SpeedtestDownloadTimeoutSeconds')) { [Math]::Max(1, [int]$Config.SpeedtestDownloadTimeoutSeconds) } else { 180 }
+    $downloadTimeoutSeconds = if ($Config.ContainsKey('SpeedtestDownloadTimeoutSeconds')) { [Math]::Max(1, [int]$Config.SpeedtestDownloadTimeoutSeconds) } else { 480 }
     $diagnostics = Get-NodeDiagnosticsSettings -Config $Config
     $diagnosticDelaySeconds = $delaySeconds + $diagnostics.DelaySeconds
     $targetHost = Convert-ToShellSingleQuoted -Value (Get-NodeDiagnosticsTargetHost -Config $Config)
@@ -406,7 +406,7 @@ awk -v nodeid="`$nodeid" -v start="`$start" -v t0="`$t0" -v t1="`$t1" -v target=
         printf "speedtest_size_mismatch,nodeid=%s bytes=%s sec=%.6f expected_bytes=%s timeout_seconds=%s target=\"%s\" %s\n",nodeid,bytes,sec,expected_bytes,timeout_seconds,target,start
         exit 0
     }
-    if (sec >= timeout_seconds) {
+    if (sec > timeout_seconds || (sec == timeout_seconds && (bytes != expected_bytes || wget_exit != 0))) {
         printf "speedtest_timeout,nodeid=%s exit=%s bytes=%s sec=%.6f expected_bytes=%s timeout_seconds=%s target=\"%s\" %s\n",nodeid,wget_exit,bytes,sec,expected_bytes,timeout_seconds,target,start
         exit 0
     }
@@ -1062,3 +1062,4 @@ function ConvertFrom-NodeDiagnosticOutput {
         Load15                 = [double]::Parse($summaryMatch.Groups['load15'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
     }
 }
+

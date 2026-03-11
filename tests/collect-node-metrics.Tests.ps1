@@ -205,7 +205,7 @@ Describe 'Invoke-CollectNodeMetricsMain' {
 
 Describe 'ConvertFrom-MeasurementOutput' {
     It 'parses valid line protocol' {
-        $raw = 'speedtest,nodeid=001122334455 download_mbit=87.32 bytes=104857600 sec=9.608123 timeout_seconds=180,target="https://fsn1-speed.hetzner.com/100MB.bin" 1731000000000000000'
+        $raw = 'speedtest,nodeid=001122334455 download_mbit=87.32 bytes=104857600 sec=9.608123 timeout_seconds=480,target="https://fsn1-speed.hetzner.com/100MB.bin" 1731000000000000000'
         $parsed = ConvertFrom-MeasurementOutput -RawOutput $raw
 
         $parsed | Should -Not -BeNullOrEmpty
@@ -215,7 +215,7 @@ Describe 'ConvertFrom-MeasurementOutput' {
         $parsed.TimestampNs | Should -Be '1731000000000000000'
         $parsed.DownloadedBytes | Should -Be 104857600
         $parsed.ExpectedBytes | Should -Be 104857600
-        $parsed.TimeoutSeconds | Should -Be 180
+        $parsed.TimeoutSeconds | Should -Be 480
         $parsed.WgetExitCode | Should -Be 0
     }
 
@@ -256,6 +256,16 @@ Describe 'ConvertFrom-MeasurementOutput' {
         $timeout.TimeoutSeconds | Should -Be 180
         $timeout.DownloadDurationSeconds | Should -BeGreaterThan 180
     }
+    It 'parses a complete download at the exact timeout as success' {
+        $parsed = ConvertFrom-MeasurementOutput -RawOutput 'speedtest,nodeid=001122334455 download_mbit=1.75 bytes=104857600 sec=480.000000 timeout_seconds=480,target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+
+        $parsed.ResultType | Should -Be 'success'
+        $parsed.DownloadedBytes | Should -Be 104857600
+        $parsed.ExpectedBytes | Should -Be 104857600
+        $parsed.TimeoutSeconds | Should -Be 480
+        $parsed.DownloadDurationSeconds | Should -Be 480
+    }
+
     It 'returns null for empty payload' {
         $parsed = ConvertFrom-MeasurementOutput -RawOutput ''
         $parsed | Should -BeNullOrEmpty
@@ -718,7 +728,7 @@ Describe 'Get-NodeTriggerCommandInfo' {
         $info.TriggerCommand | Should -Not -Match 'srand\('
         $info.TriggerCommand | Should -Match 'target_url=''https://example\.invalid/testfile\.bin'''
         $info.TriggerCommand | Should -Match 'wget_exit_file='
-        $info.TriggerCommand | Should -Match 'wget -O /dev/null -q -T 180'
+        $info.TriggerCommand | Should -Match 'wget -O /dev/null -q -T 480'
         $info.TriggerCommand | Should -Match 'wget_pid=\$!'
         $info.TriggerCommand | Should -Match "printf '%s' '124' > "
         $info.TriggerCommand | Should -Match 'expected_bytes="?123456789"?'
@@ -835,6 +845,7 @@ Describe 'Assert-ValidConfig' {
             CollectParallelism = '4'
             TriggerRandomDelayMaxSeconds = '600'
             CollectWaitTimeoutSeconds = '300'
+            SpeedtestDownloadTimeoutSeconds = '480'
             SpeedtestTargetBytes = '104857600'
             ExcelInputFiles = @('nodes.csv', '', $null)
             ExcelInputDirectories = @('/tmp/nodes', ' ')
@@ -852,6 +863,7 @@ Describe 'Assert-ValidConfig' {
         $config.CollectParallelism | Should -Be 4
         $config.TriggerRandomDelayMaxSeconds | Should -Be 600
         $config.CollectWaitTimeoutSeconds | Should -Be 300
+        $config.SpeedtestDownloadTimeoutSeconds | Should -Be 480
         $config.SpeedtestTargetBytes | Should -Be 104857600
         $config.ExcelInputFiles | Should -Be @('nodes.csv')
         $config.ExcelInputDirectories | Should -Be @('/tmp/nodes')
@@ -1189,3 +1201,5 @@ Describe 'Invoke-NodeCollectBatch' {
         @($sorted[1].CollectResult.Files).Count | Should -Be 1
     }
 }
+
+
