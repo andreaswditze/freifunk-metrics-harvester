@@ -39,47 +39,6 @@ function ConvertTo-SqlEscapedLiteral {
     return $Value.Replace("'", "''")
 }
 
-function Get-SqliteTableColumns {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Config,
-        [Parameter(Mandatory = $true)]
-        [string]$TableName
-    )
-
-    $columns = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($row in @(Invoke-Sqlite -Config $Config -Sql ("PRAGMA table_info($TableName);"))) {
-        $parts = @([string]$row -split '\|', 6)
-        if ($parts.Count -ge 2) {
-            [void]$columns.Add((Convert-ToTrimmedString -Value $parts[1]))
-        }
-    }
-
-    return $columns
-}
-
-function Ensure-SqliteColumn {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Config,
-        [Parameter(Mandatory = $true)]
-        [string]$TableName,
-        [Parameter(Mandatory = $true)]
-        [string]$ColumnName,
-        [Parameter(Mandatory = $true)]
-        [string]$Definition
-    )
-
-    $columns = Get-SqliteTableColumns -Config $Config -TableName $TableName
-    if ($columns.Contains($ColumnName)) {
-        return
-    }
-
-    Invoke-Sqlite -Config $Config -Sql ("ALTER TABLE $TableName ADD COLUMN $ColumnName $Definition;") | Out-Null
-}
-
 function Initialize-Database {
     [CmdletBinding()]
     param(
@@ -209,29 +168,7 @@ CREATE INDEX IF NOT EXISTS idx_node_diagnostics_run_id ON node_diagnostics(run_i
 CREATE INDEX IF NOT EXISTS idx_node_diagnostics_device_id ON node_diagnostics(device_id);
 CREATE INDEX IF NOT EXISTS idx_node_diagnostics_run_device_id ON node_diagnostics(run_id, device_id);
 "@
-
     Invoke-Sqlite -Config $Config -Sql $ddl | Out-Null
-    Ensure-SqliteColumn -Config $Config -TableName 'measurements' -ColumnName 'wget_exit_reason' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'measurements' -ColumnName 'wget_stderr' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'target_ipv4' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'target_ipv6' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'route_get_ipv4' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'route_get_ipv6' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'wget_stderr' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'tcp_gateway_probe_port' -Definition 'INTEGER'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'tcp_gateway_probe_result' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'tcp_target_probe_port' -Definition 'INTEGER'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'tcp_target_probe_result' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'target_resolution' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'route_get' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'tcp_gateway_probe' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'tcp_target_probe' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'ip_rule' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'batctl_if' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'batctl_n' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'ubus_network_dump' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'ubus_ifstatus_wan' -Definition 'TEXT'
-    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'ubus_ifstatus_wan6' -Definition 'TEXT'
     Write-Log -Message "Database initialized: $($Config.DatabasePath)"
 }
 
@@ -513,6 +450,10 @@ function Add-NodeJobRecord {
 
     Invoke-Sqlite -Config $Config -Sql $sql | Out-Null
 }
+
+
+
+
 
 
 

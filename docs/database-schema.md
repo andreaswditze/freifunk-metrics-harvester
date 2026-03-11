@@ -139,9 +139,10 @@ The schema also creates operational indexes for the main query paths:
 - BATMAN mesh quality snapshots are persisted via `batctl_if` and `batctl_n` to help judge whether a stable mesh path to an exit gateway exists.
 - Default gateway TCP reachability is additionally persisted via `tcp_gateway_probe_port`, `tcp_gateway_probe_result`, and `tcp_gateway_probe` so WAN-less nodes can be distinguished from pure ICMP reachability issues.
 - Target-host TCP reachability is additionally persisted via `tcp_target_probe_port`, `tcp_target_probe_result`, and `tcp_target_probe` to separate long `downloaded_bytes = 0` failures from DNS-only or ICMP-only symptoms.
-- Schema initialization runs automatically inside `collect-node-metrics.ps1`.
+- Schema initialization runs automatically inside `collect-node-metrics.ps1` and applies the current schema directly for fresh database setups without `ALTER TABLE` migrations.
 - The collect phase waits for parseable result files using polling and a timeout based on `TriggerRandomDelayMaxSeconds + CollectWaitTimeoutSeconds`.
 - WAL mode is enabled for the database.
+
 
 
 
