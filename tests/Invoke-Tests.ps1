@@ -59,6 +59,14 @@ $invokeParams = @{
 if ($RunSshStreaming) {
     $invokeParams['TagFilter'] = @('ssh-streaming')
 }
+else {
+    $excludeTags = @('ssh-streaming')
+    if (-not $IncludeIntegration) {
+        $excludeTags += 'integration'
+    }
+
+    $invokeParams['ExcludeTagFilter'] = $excludeTags
+}
 
 if ($OutputFormat -ne 'None') {
     if ([string]::IsNullOrWhiteSpace($OutputPath)) {
@@ -75,9 +83,18 @@ if ($OutputFormat -ne 'None') {
 }
 
 $previousConfigPath = $env:FFMH_TEST_CONFIG_PATH
+$exitCode = 0
 try {
     $env:FFMH_TEST_CONFIG_PATH = Resolve-TestConfigPath -ProjectRoot $projectRoot -RequestedPath $ConfigPath
-    Invoke-Pester @invokeParams
+    $result = Invoke-Pester @invokeParams
+    if ($null -ne $result -and $result.FailedCount -gt 0) {
+        [Console]::Error.WriteLine('Pester reported ' + $result.FailedCount + ' failed test(s).')
+        $exitCode = 1
+    }
+}
+catch {
+    [Console]::Error.WriteLine(($_ | Out-String).Trim())
+    $exitCode = 1
 }
 finally {
     if ($null -eq $previousConfigPath) {
@@ -88,3 +105,6 @@ finally {
     }
 }
 
+if ($exitCode -ne 0) {
+    [Environment]::Exit($exitCode)
+}

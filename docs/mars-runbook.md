@@ -106,8 +106,10 @@ pwsh ./src/collect-node-metrics.ps1 -ConfigPath ./src/config.production.ps1
 
 Operational flow:
 - Trigger phase runs in parallel up to `TriggerParallelism`.
-- Each node delays its download randomly between `0` and `TriggerRandomDelayMaxSeconds` seconds.
-- After trigger completion, the collector waits `2 * TriggerRandomDelayMaxSeconds`.
+- Each node receives a controller-assigned download delay between `0` and `TriggerRandomDelayMaxSeconds` seconds.
+- On odd ISO weekdays, delays follow ascending last-known throughput; on even ISO weekdays, they follow ascending node ID.
+- The weekday alternation avoids the same mesh-cluster neighbors always starting together and gives recurring anomalies a chance to show up under different start offsets.
+- After trigger completion, the collector waits and polls for up to `TriggerRandomDelayMaxSeconds + CollectWaitTimeoutSeconds`.
 - Collect phase reconnects only to successfully triggered nodes and runs in parallel up to `CollectParallelism`.
 - Result files are fetched per node in one SSH stream. Parsed measurement files are removed remotely. Pending files remain on the node.
 

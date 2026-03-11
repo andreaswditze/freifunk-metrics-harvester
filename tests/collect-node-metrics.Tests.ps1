@@ -920,7 +920,7 @@ Describe 'Import-NodeListFromExcel' {
     }
 }
 Describe 'Get-NodeTriggerAssignments' {
-    It 'spreads unknown and slow nodes across the beginning of the delay window' {
+    It 'uses throughput ordering on odd ISO weekdays' {
         InModuleScope FreifunkMetrics {
             $config = @{ TriggerRandomDelayMaxSeconds = 10 }
             $nodes = @(
@@ -930,6 +930,7 @@ Describe 'Get-NodeTriggerAssignments' {
                 [pscustomobject]@{ DeviceID = 'node-004'; Name = 'Node 4'; IP = '2a03:2260::4'; Domain = 'dom-a' }
             )
 
+            Mock Get-Date { [datetime]'2026-03-11T12:00:00' }
             Mock Get-LatestThroughputByIp {
                 @{
                     '2a03:2260::2' = 0.0
@@ -948,6 +949,39 @@ Describe 'Get-NodeTriggerAssignments' {
             $delayByDeviceId['node-002'] | Should -Be 3
             $delayByDeviceId['node-003'] | Should -Be 7
             $delayByDeviceId['node-004'] | Should -Be 10
+        }
+    }
+
+    It 'uses ascending node ids on even ISO weekdays' {
+        InModuleScope FreifunkMetrics {
+            $config = @{ TriggerRandomDelayMaxSeconds = 10 }
+            $nodes = @(
+                [pscustomobject]@{ DeviceID = 'node-020'; Name = 'Node 20'; IP = '2a03:2260::20'; Domain = 'dom-a' }
+                [pscustomobject]@{ DeviceID = 'node-003'; Name = 'Node 3'; IP = '2a03:2260::3'; Domain = 'dom-a' }
+                [pscustomobject]@{ DeviceID = 'node-100'; Name = 'Node 100'; IP = '2a03:2260::100'; Domain = 'dom-a' }
+                [pscustomobject]@{ DeviceID = 'node-010'; Name = 'Node 10'; IP = '2a03:2260::10'; Domain = 'dom-a' }
+            )
+
+            Mock Get-Date { [datetime]'2026-03-12T12:00:00' }
+            Mock Get-LatestThroughputByIp {
+                @{
+                    '2a03:2260::20' = 5.0
+                    '2a03:2260::3' = 90.0
+                    '2a03:2260::100' = 1.0
+                    '2a03:2260::10' = 50.0
+                }
+            }
+
+            $assigned = @(Get-NodeTriggerAssignments -Config $config -RunId 'run-a' -Nodes $nodes)
+            $delayByDeviceId = @{}
+            foreach ($item in $assigned) {
+                $delayByDeviceId[$item.Node.DeviceID] = $item.AssignedDelaySeconds
+            }
+
+            $delayByDeviceId['node-003'] | Should -Be 0
+            $delayByDeviceId['node-010'] | Should -Be 3
+            $delayByDeviceId['node-020'] | Should -Be 7
+            $delayByDeviceId['node-100'] | Should -Be 10
         }
     }
 

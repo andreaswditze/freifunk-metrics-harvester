@@ -187,6 +187,44 @@ function Get-NodeTriggerAssignmentOrderKey {
     return [Convert]::ToHexString($hashBytes)
 }
 
+function Get-NodeTriggerSchedulingMode {
+    [CmdletBinding()]
+    param(
+        [datetime]$Timestamp = (Get-Date)
+    )
+
+    $weekdayNumber = [int]$Timestamp.DayOfWeek
+    if ($weekdayNumber -eq 0) {
+        $weekdayNumber = 7
+    }
+
+    if (($weekdayNumber % 2) -eq 0) {
+        return 'NodeId'
+    }
+
+    return 'Throughput'
+}
+
+function Get-NodeTriggerNodeIdSortKey {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Node
+    )
+
+    foreach ($propertyName in @('NodeId', 'NodeID', 'DeviceID', 'Id', 'ID')) {
+        if ($null -eq $Node.PSObject.Properties[$propertyName]) {
+            continue
+        }
+
+        $value = Convert-ToTrimmedString -Value $Node.$propertyName
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
+    }
+
+    return ''
+}
 function Get-NodeTriggerAssignments {
     [CmdletBinding()]
     param(
@@ -230,6 +268,21 @@ function Get-NodeTriggerAssignments {
         )
     }
 
+    $schedulingMode = Get-NodeTriggerSchedulingMode
+    $sortProperties = if ($schedulingMode -eq 'NodeId') {
+        @(
+            @{ Expression = { Get-NodeTriggerNodeIdSortKey -Node $_.Node } },
+            @{ Expression = { $_.Index } }
+        )
+    }
+    else {
+        @(
+            @{ Expression = { $_.LatestThroughput } },
+            @{ Expression = { Get-NodeTriggerAssignmentOrderKey -RunId $RunId -Node $_.Node } },
+            @{ Expression = { $_.Index } }
+        )
+    }
+
     $orderedNodes = @(
         $indexedNodes |
             ForEach-Object {
@@ -245,7 +298,7 @@ function Get-NodeTriggerAssignments {
                     LatestThroughput = $latestThroughput
                 }
             } |
-            Sort-Object @{ Expression = { $_.LatestThroughput } }, @{ Expression = { Get-NodeTriggerAssignmentOrderKey -RunId $RunId -Node $_.Node } }, @{ Expression = { $_.Index } }
+            Sort-Object $sortProperties
     )
 
     if ($orderedNodes.Count -gt 0) {
@@ -745,6 +798,21 @@ function Get-NodeTriggerAssignments {
         )
     }
 
+    $schedulingMode = Get-NodeTriggerSchedulingMode
+    $sortProperties = if ($schedulingMode -eq 'NodeId') {
+        @(
+            @{ Expression = { Get-NodeTriggerNodeIdSortKey -Node $_.Node } },
+            @{ Expression = { $_.Index } }
+        )
+    }
+    else {
+        @(
+            @{ Expression = { $_.LatestThroughput } },
+            @{ Expression = { Get-NodeTriggerAssignmentOrderKey -RunId $RunId -Node $_.Node } },
+            @{ Expression = { $_.Index } }
+        )
+    }
+
     $orderedNodes = @(
         $indexedNodes |
             ForEach-Object {
@@ -760,7 +828,7 @@ function Get-NodeTriggerAssignments {
                     LatestThroughput = $latestThroughput
                 }
             } |
-            Sort-Object @{ Expression = { $_.LatestThroughput } }, @{ Expression = { Get-NodeTriggerAssignmentOrderKey -RunId $RunId -Node $_.Node } }, @{ Expression = { $_.Index } }
+            Sort-Object $sortProperties
     )
 
     if ($orderedNodes.Count -gt 0) {

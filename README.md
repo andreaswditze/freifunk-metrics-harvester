@@ -71,7 +71,10 @@ The collector validates these values at startup and aborts early on invalid conf
 
 ## Runtime behavior
 - Triggering runs with up to `TriggerParallelism` concurrent SSH sessions.
-- Each node waits a random delay between `0` and `TriggerRandomDelayMaxSeconds` before starting the download.
+- Each node waits a controller-assigned delay between `0` and `TriggerRandomDelayMaxSeconds` before starting the download.
+- On odd ISO weekdays, delays are still assigned by ascending last-known throughput so unknown and slow nodes start first.
+- On even ISO weekdays, delays are assigned by ascending node ID instead.
+- This weekday switch prevents nodes that sit behind each other in the same mesh cluster from always starting together. That makes recurring timing-related anomalies easier to diagnose because those nodes will periodically start at different times.
 - After all trigger attempts finish, the collector waits and polls for completed node results for up to `TriggerRandomDelayMaxSeconds + CollectWaitTimeoutSeconds`.
 - Collecting runs only against nodes that were successfully triggered.
 - Collecting uses up to `CollectParallelism` concurrent SSH sessions.
