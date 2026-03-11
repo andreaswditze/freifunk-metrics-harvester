@@ -132,6 +132,7 @@ Console behavior:
 cd /home/ffuser/skripte/freifunk-metrics-harvester
 pwsh ./Invoke-Tests.ps1
 ```
+This default run now executes the full suite, including the HTTP integration test and the SSH streaming test.
 
 Alternative direct runner:
 

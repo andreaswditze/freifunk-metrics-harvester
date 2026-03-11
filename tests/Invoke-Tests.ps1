@@ -26,9 +26,9 @@ function Resolve-TestConfigPath {
 
     $candidates += @(
         (Join-Path $ProjectRoot 'src/config.production.ps1'),
-        (Join-Path $ProjectRoot 'src/config.development.ps1'),
+        (Join-Path $ProjectRoot 'src/config.demo.ps1'),
         (Join-Path $ProjectRoot 'src/config.development.example.ps1'),
-        (Join-Path $ProjectRoot 'src/config.demo.ps1')
+        (Join-Path $ProjectRoot 'src/config.development.ps1')
     )
 
     foreach ($candidate in $candidates) {
@@ -59,12 +59,6 @@ $invokeParams = @{
 if ($RunSshStreaming) {
     $invokeParams['TagFilter'] = @('ssh-streaming')
 }
-elseif (-not $IncludeIntegration) {
-    $invokeParams['ExcludeTagFilter'] = @('integration', 'ssh-streaming')
-}
-else {
-    $invokeParams['ExcludeTagFilter'] = @('ssh-streaming')
-}
 
 if ($OutputFormat -ne 'None') {
     if ([string]::IsNullOrWhiteSpace($OutputPath)) {
@@ -82,10 +76,7 @@ if ($OutputFormat -ne 'None') {
 
 $previousConfigPath = $env:FFMH_TEST_CONFIG_PATH
 try {
-    if ($RunSshStreaming) {
-        $env:FFMH_TEST_CONFIG_PATH = Resolve-TestConfigPath -ProjectRoot $projectRoot -RequestedPath $ConfigPath
-    }
-
+    $env:FFMH_TEST_CONFIG_PATH = Resolve-TestConfigPath -ProjectRoot $projectRoot -RequestedPath $ConfigPath
     Invoke-Pester @invokeParams
 }
 finally {
@@ -96,3 +87,4 @@ finally {
         $env:FFMH_TEST_CONFIG_PATH = $previousConfigPath
     }
 }
+
