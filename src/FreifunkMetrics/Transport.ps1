@@ -1507,6 +1507,8 @@ function Get-NodeDiagnosticSections {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowEmptyString()]
         [string[]]$Lines
     )
 
@@ -1625,6 +1627,8 @@ function Get-MeasurementSections {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowEmptyString()]
         [string[]]$Lines
     )
 
@@ -2231,6 +2235,7 @@ rm -f "`$wget_stderr_file"
         DiagnosticDelaySeconds = $diagnosticDelaySeconds
     }
 }
+
 
 
 

@@ -1679,3 +1679,18 @@ Describe 'Invoke-NodeCollectBatch' {
 
 
 
+Describe 'Section parsers' {
+    It 'accepts empty diagnostic lines without throwing' {
+        InModuleScope FreifunkMetrics {
+            { Get-NodeDiagnosticSections -Lines @('') } | Should -Not -Throw
+            (Get-NodeDiagnosticSections -Lines @('')).Count | Should -Be 0
+        }
+    }
+
+    It 'accepts empty measurement lines without throwing' {
+        InModuleScope FreifunkMetrics {
+            { Get-MeasurementSections -Lines @('') } | Should -Not -Throw
+            (Get-MeasurementSections -Lines @('')).Count | Should -Be 0
+        }
+    }
+}
