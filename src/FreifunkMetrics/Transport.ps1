@@ -346,6 +346,7 @@ function Get-NodeTriggerCommandInfo {
     $targetUrl = Convert-ToTrimmedString -Value $Config.SpeedtestTargetUrl
     $targetUrlShell = Convert-ToShellSingleQuoted -Value $targetUrl
     $targetBytes = [Math]::Max(1, [int64]$Config.SpeedtestTargetBytes)
+    $downloadTimeoutSeconds = if ($Config.ContainsKey('SpeedtestDownloadTimeoutSeconds')) { [Math]::Max(1, [int]$Config.SpeedtestDownloadTimeoutSeconds) } else { 180 }
     $diagnostics = Get-NodeDiagnosticsSettings -Config $Config
     $diagnosticDelaySeconds = $delaySeconds + $diagnostics.DelaySeconds
     $targetHost = Convert-ToShellSingleQuoted -Value (Get-NodeDiagnosticsTargetHost -Config $Config)
@@ -359,10 +360,29 @@ start=`$(date +%s%N)
 wget_exit_file="/tmp/harvester-wget-exit-`$$.txt"
 rm -f "`$wget_exit_file"
 t0=`$(date +%s.%N)
-wget -O /dev/null -q "`$target_url"
-printf '%s' "`$?" > "`$wget_exit_file"
+wget -O /dev/null -q -T $downloadTimeoutSeconds -t 1 "`$target_url" &
+wget_pid=`$!
+(
+    sleep $downloadTimeoutSeconds
+    if kill -0 "`$wget_pid" 2>/dev/null; then
+        kill "`$wget_pid" 2>/dev/null || true
+        sleep 1
+        kill -9 "`$wget_pid" 2>/dev/null || true
+        printf '%s' '124' > "`$wget_exit_file"
+    fi
+) &
+wget_watchdog_pid=`$!
+wait "`$wget_pid"
+wget_wait_exit=`$?
+kill "`$wget_watchdog_pid" 2>/dev/null || true
+wait "`$wget_watchdog_pid" 2>/dev/null || true
+if [ -f "`$wget_exit_file" ]; then
+    wget_exit=`$(cat "`$wget_exit_file" 2>/dev/null)
+else
+    wget_exit="`$wget_wait_exit"
+    printf '%s' "`$wget_exit" > "`$wget_exit_file"
+fi
 t1=`$(date +%s.%N)
-wget_exit=`$(cat "`$wget_exit_file" 2>/dev/null)
 bytes=0
 if [ "`$wget_exit" = "0" ]; then
     bytes="$targetBytes"
