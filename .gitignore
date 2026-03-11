@@ -10,3 +10,4 @@
 /temp/*
 !/temp/.gitkeep
 
+testResults.xml
