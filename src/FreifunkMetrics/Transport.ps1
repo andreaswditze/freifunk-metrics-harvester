@@ -472,7 +472,7 @@ fi
         )
     }
 
-    $triggerCmd = $triggerSegments -join '; '
+    $triggerCmd = $triggerSegments -join "`n"
 
     return [pscustomobject]@{
         RemoteResultFile              = $remoteResultPattern

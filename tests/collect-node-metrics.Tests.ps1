@@ -1003,6 +1003,23 @@ Describe 'Receive-NodeResults' {
 }
 
 
+Describe 'Get-NodeTriggerCommandInfo' {
+    It 'does not join background commands with invalid ampersand semicolons' {
+        $config = @{
+            SpeedtestTargetUrl = 'https://example.invalid/test.bin'
+            SpeedtestTargetBytes = 104857600
+            RemoteResultDir = '/tmp/harvester'
+            EnableNodeDiagnostics = $true
+            NodeDiagnosticsDelaySeconds = 60
+        }
+
+        $info = Get-NodeTriggerCommandInfo -Config $config -RunId 'run-test' -AssignedDelaySeconds 30
+
+        $info.TriggerCommand | Should -Not -Match '&;'
+        $info.TriggerCommand | Should -Match "diag_out='/tmp/harvester/run-test/diag-'"
+    }
+}
+
 Describe 'Get-RemoteRunResultDir' {
     It 'builds a run-specific remote directory' {
         $config = @{ RemoteResultDir = '/tmp/harvester' }
