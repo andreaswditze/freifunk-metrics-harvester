@@ -207,9 +207,12 @@ function Invoke-CollectNodeMetricsMain {
         Write-Progress -Id 1 -Activity 'Triggering nodes' -Completed
 
         $waitSeconds = [Math]::Max(0, [int]$config.TriggerRandomDelayMaxSeconds) * 2
-        if ($waitSeconds -gt 0) {
+        if ($waitSeconds -gt 0 -and $triggeredNodes.Count -gt 0) {
             Write-Log -Message "Waiting $waitSeconds seconds before collect phase"
             Wait-WithProgress -Seconds $waitSeconds -Activity 'Waiting for randomized download starts' -Config $config -RunId $RunId -Nodes @($triggeredNodes.ToArray())
+        }
+        elseif ($waitSeconds -gt 0) {
+            Write-Log -Level WARN -Message 'Skipping wait phase because no nodes were triggered successfully.'
         }
 
         $collectedCount = 0
@@ -221,7 +224,10 @@ function Invoke-CollectNodeMetricsMain {
         Write-Progress -Id 2 -Activity 'Collecting node results' -Status ("0/{0}" -f $collectTotal) -PercentComplete 0
 
         Write-Log -Message "Collect phase start, nodes=$($triggeredNodes.Count), parallelism=$($config.CollectParallelism)"
-        foreach ($collectEntry in Invoke-NodeCollectBatch -Config $config -Nodes @($triggeredNodes.ToArray()) -RunId $RunId -RawDir $runInfo.RawDir) {
+        if ($triggeredNodes.Count -eq 0) {
+            Write-Log -Level WARN -Message 'Skipping collect phase because no nodes were triggered successfully.'
+        }
+        foreach ($collectEntry in $(if ($triggeredNodes.Count -gt 0) { Invoke-NodeCollectBatch -Config $config -Nodes @($triggeredNodes.ToArray()) -RunId $RunId -RawDir $runInfo.RawDir } else { @() })) {
             $collectIndex++
             $node = $collectEntry.Node
             $collect = $collectEntry.CollectResult
