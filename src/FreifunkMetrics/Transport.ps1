@@ -254,17 +254,10 @@ function Get-NodeDiagnosticsSettings {
 
     $enabled = if ($Config.ContainsKey('EnableNodeDiagnostics')) { [bool]$Config.EnableNodeDiagnostics } else { $true }
     $delaySeconds = if ($Config.ContainsKey('NodeDiagnosticsDelaySeconds')) { [Math]::Max(0, [int]$Config.NodeDiagnosticsDelaySeconds) } else { 60 }
-    $keepThresholdMbit = if ($Config.ContainsKey('NodeDiagnosticsKeepThresholdMbit')) {
-        [double]::Parse([string]$Config.NodeDiagnosticsKeepThresholdMbit, [System.Globalization.CultureInfo]::InvariantCulture)
-    }
-    else {
-        10.0
-    }
 
     return [pscustomobject]@{
         Enabled           = $enabled
         DelaySeconds      = $delaySeconds
-        KeepThresholdMbit = $keepThresholdMbit
     }
 }
 
@@ -281,51 +274,6 @@ function Get-NodeDiagnosticsTargetHost {
     }
 
     return $uri.Host
-}
-
-function Test-ShouldKeepNodeDiagnostics {
-    [CmdletBinding()]
-    param(
-        [AllowEmptyCollection()]
-        [object[]]$MeasurementFiles = @(),
-        [Parameter(Mandatory = $true)]
-        [double]$KeepThresholdMbit
-    )
-
-    if (@($MeasurementFiles).Count -eq 0) {
-        return $true
-    }
-
-    foreach ($file in @($MeasurementFiles)) {
-        if ($null -eq $file.ParsedMeasurement) {
-            continue
-        }
-
-        if ($file.ParsedMeasurement.ResultType -eq 'final_failed') {
-            return $true
-        }
-
-        if ($file.ParsedMeasurement.ResultType -eq 'success' -and [double]$file.ParsedMeasurement.ThroughputMbit -le $KeepThresholdMbit) {
-            return $true
-        }
-    }
-
-    return $false
-}
-
-function Remove-NodeDiagnosticArtifacts {
-    [CmdletBinding()]
-    param(
-        [AllowEmptyCollection()]
-        [object[]]$DiagnosticFiles = @()
-    )
-
-    foreach ($file in @($DiagnosticFiles)) {
-        $localPath = Convert-ToTrimmedString -Value $file.LocalPath
-        if (-not [string]::IsNullOrWhiteSpace($localPath) -and (Test-Path -Path $localPath -PathType Leaf)) {
-            Remove-Item -Path $localPath -Force
-        }
-    }
 }
 
 function Get-NodeTriggerCommandInfo {
@@ -503,13 +451,12 @@ fi
     $triggerCmd = $triggerSegments -join "`n"
 
     return [pscustomobject]@{
-        RemoteResultFile              = $remoteResultPattern
-        RemoteErrorFile               = ''
-        TriggerCommand                = $triggerCmd
-        AssignedDelaySeconds          = $delaySeconds
-        DiagnosticDelaySeconds        = $diagnosticDelaySeconds
-        DiagnosticsEnabled            = $diagnostics.Enabled
-        DiagnosticsKeepThresholdMbit  = $diagnostics.KeepThresholdMbit
+        RemoteResultFile       = $remoteResultPattern
+        RemoteErrorFile        = ''
+        TriggerCommand         = $triggerCmd
+        AssignedDelaySeconds   = $delaySeconds
+        DiagnosticDelaySeconds = $diagnosticDelaySeconds
+        DiagnosticsEnabled     = $diagnostics.Enabled
     }
 }
 

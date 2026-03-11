@@ -54,7 +54,6 @@ function Get-EnvironmentConfig {
         SpeedtestTargetBytes              = 104857600
         EnableNodeDiagnostics             = $true
         NodeDiagnosticsDelaySeconds       = 60
-        NodeDiagnosticsKeepThresholdMbit  = 10.0
         LogFilePrefix                     = 'collect-node-metrics'
         ExcelInputFiles                   = @()
         ExcelInputDirectories             = @()
@@ -217,10 +216,6 @@ function Assert-ValidConfig {
         $Config.NodeDiagnosticsDelaySeconds = 60
     }
 
-    if (-not $Config.ContainsKey('NodeDiagnosticsKeepThresholdMbit')) {
-        $Config.NodeDiagnosticsKeepThresholdMbit = 10.0
-    }
-
     $Config.EnableNodeDiagnostics = [bool]$Config.EnableNodeDiagnostics
 
     try {
@@ -232,20 +227,6 @@ function Assert-ValidConfig {
 
     if ($Config.NodeDiagnosticsDelaySeconds -lt 0) {
         throw 'Config value NodeDiagnosticsDelaySeconds must be zero or greater.'
-    }
-
-    try {
-        $Config.NodeDiagnosticsKeepThresholdMbit = [double]::Parse(
-            [string]$Config.NodeDiagnosticsKeepThresholdMbit,
-            [System.Globalization.CultureInfo]::InvariantCulture
-        )
-    }
-    catch {
-        throw 'Config value NodeDiagnosticsKeepThresholdMbit must be numeric.'
-    }
-
-    if ($Config.NodeDiagnosticsKeepThresholdMbit -lt 0) {
-        throw 'Config value NodeDiagnosticsKeepThresholdMbit must be zero or greater.'
     }
 
     $Config.ExcelInputFiles = @($Config.ExcelInputFiles | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })

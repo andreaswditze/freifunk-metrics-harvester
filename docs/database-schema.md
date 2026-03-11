@@ -71,7 +71,7 @@ Final stored measurements with raw payload.
 - `collected_at_utc` TEXT
 
 ### `node_diagnostics`
-Per-node early diagnostic snapshots captured near the scheduled download start and only retained for nodes without a usable result or with throughput at or below the configured threshold.
+Per-node early diagnostic snapshots captured near the scheduled download start for every node that produced a parsed diagnostic file.
 
 - `id` INTEGER PK
 - `run_id` TEXT
@@ -114,7 +114,7 @@ The schema also creates operational indexes for the main query paths:
 ## Notes
 - Raw files are also stored in `data/raw/<run_id>/`.
 - Final failed speedtest results are also stored in `measurements`; they use `throughput_mbit = 0` and preserve the raw failure payload plus parsed transfer metadata.
-- Early diagnostics are written to `data/raw/<run_id>/` for all triggered nodes, but only persisted in `node_diagnostics` when the node has no parsed result or the retained throughput is at or below `NodeDiagnosticsKeepThresholdMbit`.
+- Early diagnostics are written to `data/raw/<run_id>/` for all triggered nodes and persisted in `node_diagnostics` whenever the collector parses a diagnostic payload for that node.
 - Schema initialization runs automatically inside `collect-node-metrics.ps1`.
 - The collect phase waits for parseable result files using polling and a timeout based on `TriggerRandomDelayMaxSeconds + CollectWaitTimeoutSeconds`.
 - WAL mode is enabled for the database.

@@ -201,6 +201,114 @@ Describe 'Invoke-CollectNodeMetricsMain' {
             }
         }
     }
+
+    It 'stores diagnostics for successful high-throughput nodes' {
+        InModuleScope FreifunkMetrics {
+            $baseDir = Join-Path $TestDrive 'runner-main-diagnostics'
+            $node = [pscustomobject]@{ DeviceID = 'node-020'; Name = 'Node 20'; IP = '2a03:2260::20'; Domain = 'dom-a' }
+
+            $config = @{
+                ConfigPath = 'test-config.ps1'
+                ScriptBaseDir = $baseDir
+                RawResultBaseDir = (Join-Path $baseDir 'raw')
+                LogDir = (Join-Path $baseDir 'log')
+                TempDir = (Join-Path $baseDir 'temp')
+                DatabasePath = (Join-Path $baseDir 'metrics.db')
+                LogFilePrefix = 'collect-node-metrics'
+                ExcelInputFiles = @()
+                ExcelInputDirectories = @()
+                ExcelSearchRecurse = $false
+                UseTestNodeIPs = $false
+                TestNodeIPs = @()
+                TriggerParallelism = 1
+                CollectParallelism = 1
+                TriggerRandomDelayMaxSeconds = 0
+                SpeedtestTargetBytes = 104857600
+            }
+
+            $measurementFile = [pscustomobject]@{
+                LocalPath = 'success-fast.txt'
+                RawOutput = 'speedtest,nodeid=cc download_mbit=48.7 bytes=104857600 sec=17.208000 timeout_seconds=180,target="https://example.invalid/test.bin" 1772839860'
+                ParsedMeasurement = [pscustomobject]@{ ResultType = 'success'; NodeId = 'cc'; ThroughputMbit = 48.7; DownloadDurationSeconds = 17.208; DownloadedBytes = 104857600; TimeoutSeconds = 180 }
+            }
+            $diagnosticFile = [pscustomobject]@{
+                LocalPath = 'diag-fast.txt'
+                RawOutput = @(
+                    'diagnostic,nodeid=cc target_host="example.invalid" speedtest_delay_seconds=30 diagnostic_delay_seconds=90 timestamp=1772839800'
+                    'diag_summary,load1=0.10 load5=0.20 load15=0.30 gateway_probe="fe80::1" gateway_probe_kind="ipv6" ping_gateway_loss=0 ping_target_loss=0'
+                ) -join "`n"
+                ParsedDiagnostic = [pscustomobject]@{
+                    NodeId = 'cc'
+                    TargetHost = 'example.invalid'
+                    SpeedtestDelaySeconds = 30
+                    DiagnosticDelaySeconds = 90
+                    TimestampNs = '1772839800'
+                    GatewayProbe = 'fe80::1'
+                    GatewayProbeKind = 'ipv6'
+                    PingGatewayLossPct = 0
+                    PingTargetLossPct = 0
+                    Load1 = 0.10
+                    Load5 = 0.20
+                    Load15 = 0.30
+                }
+            }
+
+            Mock Show-StartupBanner {}
+            Mock Update-ConsoleStatus {}
+            Mock Write-Progress {}
+            Mock Write-Host {}
+            Mock Write-Log {}
+            Mock Initialize-Database {}
+            Mock Get-EnvironmentConfig { $config }
+            Mock Import-NodeListFromExcel { [pscustomobject]@{ Nodes = @($node); SourceFiles = @('nodes.csv') } }
+            Mock Start-MeasurementRun { [pscustomobject]@{ RawDir = (Join-Path $TestDrive 'raw-run-diagnostics') } }
+            Mock Write-NodeActionLog {}
+            Mock Add-NodeJobRecord {}
+            Mock Wait-WithProgress {}
+            Mock Save-Measurement {}
+            Mock Save-NodeDiagnostic {}
+            Mock Complete-MeasurementRun {}
+            Mock Invoke-NodeTriggerBatch {
+                @([pscustomobject]@{ Node = $node; TriggerResult = [pscustomobject]@{ Triggered = $true; RemoteResultFile = '/tmp/node-020.txt'; RemoteErrorFile = '/tmp/node-020.err'; AssignedDelaySeconds = 0 } })
+            }
+            Mock Invoke-NodeCollectBatch {
+                @([pscustomobject]@{
+                        Node = $node
+                        CollectResult = [pscustomobject]@{
+                            Success = $true
+                            ErrorOutput = ''
+                            Files = @($measurementFile)
+                            DiagnosticFiles = @($diagnosticFile)
+                            PendingFiles = @()
+                        }
+                    })
+            }
+
+            try {
+                Invoke-CollectNodeMetricsMain -RunId 'run-diagnostics'
+
+                Assert-MockCalled Save-NodeDiagnostic -Times 1 -Exactly -ParameterFilter {
+                    $RunId -eq 'run-diagnostics' -and
+                    $Node.DeviceID -eq 'node-020' -and
+                    $Diagnostic.NodeId -eq 'cc' -and
+                    $Diagnostic.TargetHost -eq 'example.invalid'
+                }
+                Assert-MockCalled Write-NodeActionLog -Times 1 -ParameterFilter {
+                    $Node.DeviceID -eq 'node-020' -and
+                    $Action -eq 'diagnostic_saved' -and
+                    $Detail -like 'reason=measurement_present; files=1*'
+                }
+            }
+            finally {
+                $script:CurrentConfig = $null
+                $script:LogFilePath = $null
+                $script:DailyLogDir = $null
+                $script:DailyLogFilePath = $null
+                $script:ConsoleStatusLength = 0
+                $script:ConsoleBannerShown = $false
+            }
+        }
+    }
 }
 
 Describe 'ConvertFrom-MeasurementOutput' {

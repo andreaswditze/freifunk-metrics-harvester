@@ -63,7 +63,6 @@ Runtime tuning:
 - `SpeedtestTargetBytes`
 - `EnableNodeDiagnostics`
 - `NodeDiagnosticsDelaySeconds`
-- `NodeDiagnosticsKeepThresholdMbit`
 - `RemoteResultDir`
 - `SshConnectTimeoutSeconds`
 - `LogFilePrefix`
@@ -79,7 +78,7 @@ The collector validates these values at startup and aborts early on invalid conf
 - Per node, all `*.txt` files in `RemoteResultDir` are fetched in one SSH stream instead of one `cat` call per file.
 - Each triggered node can also write an early diagnostic snapshot near the planned download start.
 - Parsed measurement and diagnostic files are deleted remotely after a successful download attempt. Files without a recognized measurement or diagnostic line stay on the node and are reported as pending.
-- Diagnostic snapshots are retained locally and in SQLite only for nodes without a parsed result or with throughput at or below `NodeDiagnosticsKeepThresholdMbit`; healthy nodes have their local diagnostic files discarded after evaluation.
+- Parsed diagnostic snapshots are retained locally and stored in SQLite for every node that produced a diagnostic file during the run.
 
 ## SSH trust model
 The collector intentionally accepts changing SSH host keys.
