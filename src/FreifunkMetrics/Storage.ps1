@@ -99,6 +99,13 @@ CREATE TABLE IF NOT EXISTS measurements (
     throughput_mbit REAL,
     measurement_timestamp_ns TEXT,
     measured_at_utc TEXT,
+    result_type TEXT,
+    failure_reason TEXT,
+    downloaded_bytes INTEGER,
+    expected_bytes INTEGER,
+    download_duration_seconds REAL,
+    timeout_seconds INTEGER,
+    wget_exit_code INTEGER,
     raw_output TEXT NOT NULL,
     collected_at_utc TEXT NOT NULL
 );
@@ -252,6 +259,13 @@ function Save-Measurement {
     $throughput = 'NULL'
     $tsNs = ''
     $measuredAtUtc = ''
+    $resultType = ''
+    $failureReason = ''
+    $downloadedBytes = 'NULL'
+    $expectedBytes = 'NULL'
+    $downloadDurationSeconds = 'NULL'
+    $timeoutSeconds = 'NULL'
+    $wgetExitCode = 'NULL'
 
     if ($ParsedMeasurement) {
         $nodeId = ConvertTo-SqlEscapedLiteral -Value $ParsedMeasurement.NodeId
@@ -259,11 +273,28 @@ function Save-Measurement {
         $throughput = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.00}', $ParsedMeasurement.ThroughputMbit)
         $tsNs = ConvertTo-SqlEscapedLiteral -Value $ParsedMeasurement.TimestampNs
         $measuredAtUtc = Convert-NodeTimestampToUtc -Timestamp $ParsedMeasurement.TimestampNs
+        $resultType = ConvertTo-SqlEscapedLiteral -Value $ParsedMeasurement.ResultType
+        $failureReason = ConvertTo-SqlEscapedLiteral -Value $ParsedMeasurement.FailureReason
+        if ($null -ne $ParsedMeasurement.PSObject.Properties['DownloadedBytes'] -and $null -ne $ParsedMeasurement.DownloadedBytes) {
+            $downloadedBytes = [string]$ParsedMeasurement.DownloadedBytes
+        }
+        if ($null -ne $ParsedMeasurement.PSObject.Properties['ExpectedBytes'] -and $null -ne $ParsedMeasurement.ExpectedBytes) {
+            $expectedBytes = [string]$ParsedMeasurement.ExpectedBytes
+        }
+        if ($null -ne $ParsedMeasurement.PSObject.Properties['DownloadDurationSeconds'] -and $null -ne $ParsedMeasurement.DownloadDurationSeconds) {
+            $downloadDurationSeconds = [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.000000}', [double]$ParsedMeasurement.DownloadDurationSeconds)
+        }
+        if ($null -ne $ParsedMeasurement.PSObject.Properties['TimeoutSeconds'] -and $null -ne $ParsedMeasurement.TimeoutSeconds) {
+            $timeoutSeconds = [string]$ParsedMeasurement.TimeoutSeconds
+        }
+        if ($null -ne $ParsedMeasurement.PSObject.Properties['WgetExitCode'] -and $null -ne $ParsedMeasurement.WgetExitCode) {
+            $wgetExitCode = [string]$ParsedMeasurement.WgetExitCode
+        }
     }
 
     $measuredAtEsc = ConvertTo-SqlEscapedLiteral -Value $measuredAtUtc
 
-    $insertMeasurement = "INSERT INTO measurements (run_id, device_id, name, ip, domain, nodeid, target, throughput_mbit, measurement_timestamp_ns, measured_at_utc, raw_output, collected_at_utc) VALUES ('$((ConvertTo-SqlEscapedLiteral -Value $RunId))', '$deviceId', '$name', '$ip', '$domain', '$nodeId', '$target', $throughput, '$tsNs', '$measuredAtEsc', '$rawEsc', '$nowUtc');"
+    $insertMeasurement = "INSERT INTO measurements (run_id, device_id, name, ip, domain, nodeid, target, throughput_mbit, measurement_timestamp_ns, measured_at_utc, result_type, failure_reason, downloaded_bytes, expected_bytes, download_duration_seconds, timeout_seconds, wget_exit_code, raw_output, collected_at_utc) VALUES ('$((ConvertTo-SqlEscapedLiteral -Value $RunId))', '$deviceId', '$name', '$ip', '$domain', '$nodeId', '$target', $throughput, '$tsNs', '$measuredAtEsc', '$resultType', '$failureReason', $downloadedBytes, $expectedBytes, $downloadDurationSeconds, $timeoutSeconds, $wgetExitCode, '$rawEsc', '$nowUtc');"
 
     Invoke-Sqlite -Config $Config -Sql $insertMeasurement | Out-Null
     Write-Log -Message "DB insert complete for node ${ip}"

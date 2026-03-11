@@ -50,13 +50,13 @@ Describe 'Invoke-CollectNodeMetricsMain' {
 
             $successFile = [pscustomobject]@{
                 LocalPath = 'success.txt'
-                RawOutput = 'speedtest,nodeid=aa download_mbit=10.5,target="https://example.invalid/test.bin" 1772839860'
-                ParsedMeasurement = [pscustomobject]@{ ResultType = 'success'; NodeId = 'aa'; ThroughputMbit = 10.5 }
+                RawOutput = 'speedtest,nodeid=aa download_mbit=10.5 bytes=104857600 sec=79.891561 timeout_seconds=180,target="https://example.invalid/test.bin" 1772839860'
+                ParsedMeasurement = [pscustomobject]@{ ResultType = 'success'; NodeId = 'aa'; ThroughputMbit = 10.5; DownloadDurationSeconds = 79.891561; DownloadedBytes = 104857600; TimeoutSeconds = 180 }
             }
             $failedFile = [pscustomobject]@{
                 LocalPath = 'failed.txt'
-                RawOutput = 'wget_failed,nodeid=bb exit=4 bytes=0 expected_bytes=104857600 target="https://example.invalid/test.bin" 1772839860'
-                ParsedMeasurement = [pscustomobject]@{ ResultType = 'final_failed'; NodeId = 'bb'; FailureReason = 'wget_failed'; ThroughputMbit = 0 }
+                RawOutput = 'wget_failed,nodeid=bb exit=4 bytes=0 sec=12.500000 expected_bytes=104857600 timeout_seconds=180 target="https://example.invalid/test.bin" 1772839860'
+                ParsedMeasurement = [pscustomobject]@{ ResultType = 'final_failed'; NodeId = 'bb'; FailureReason = 'wget_failed'; ThroughputMbit = 0; DownloadDurationSeconds = 12.5; DownloadedBytes = 0; ExpectedBytes = 104857600; TimeoutSeconds = 180; WgetExitCode = 4 }
             }
 
             Mock Show-StartupBanner {}
@@ -143,13 +143,13 @@ Describe 'Invoke-CollectNodeMetricsMain' {
 
             $fileA = [pscustomobject]@{
                 LocalPath = 'success-a.txt'
-                RawOutput = 'speedtest,nodeid=aa download_mbit=20.1,target="https://example.invalid/test.bin" 1772839860'
-                ParsedMeasurement = [pscustomobject]@{ ResultType = 'success'; NodeId = 'aa'; ThroughputMbit = 20.1 }
+                RawOutput = 'speedtest,nodeid=aa download_mbit=20.1 bytes=104857600 sec=41.734866 timeout_seconds=180,target="https://example.invalid/test.bin" 1772839860'
+                ParsedMeasurement = [pscustomobject]@{ ResultType = 'success'; NodeId = 'aa'; ThroughputMbit = 20.1; DownloadDurationSeconds = 41.734866; DownloadedBytes = 104857600; TimeoutSeconds = 180 }
             }
             $fileB = [pscustomobject]@{
                 LocalPath = 'success-b.txt'
-                RawOutput = 'speedtest,nodeid=bb download_mbit=22.3,target="https://example.invalid/test.bin" 1772839860'
-                ParsedMeasurement = [pscustomobject]@{ ResultType = 'success'; NodeId = 'bb'; ThroughputMbit = 22.3 }
+                RawOutput = 'speedtest,nodeid=bb download_mbit=22.3 bytes=104857600 sec=37.616179 timeout_seconds=180,target="https://example.invalid/test.bin" 1772839860'
+                ParsedMeasurement = [pscustomobject]@{ ResultType = 'success'; NodeId = 'bb'; ThroughputMbit = 22.3; DownloadDurationSeconds = 37.616179; DownloadedBytes = 104857600; TimeoutSeconds = 180 }
             }
 
             Mock Show-StartupBanner {}
@@ -205,7 +205,7 @@ Describe 'Invoke-CollectNodeMetricsMain' {
 
 Describe 'ConvertFrom-MeasurementOutput' {
     It 'parses valid line protocol' {
-        $raw = 'speedtest,nodeid=001122334455 download_mbit=87.32,target="https://fsn1-speed.hetzner.com/100MB.bin" 1731000000000000000'
+        $raw = 'speedtest,nodeid=001122334455 download_mbit=87.32 bytes=104857600 sec=9.608123 timeout_seconds=180,target="https://fsn1-speed.hetzner.com/100MB.bin" 1731000000000000000'
         $parsed = ConvertFrom-MeasurementOutput -RawOutput $raw
 
         $parsed | Should -Not -BeNullOrEmpty
@@ -213,6 +213,10 @@ Describe 'ConvertFrom-MeasurementOutput' {
         $parsed.ThroughputMbit | Should -Be 87.32
         $parsed.Target | Should -Be 'https://fsn1-speed.hetzner.com/100MB.bin'
         $parsed.TimestampNs | Should -Be '1731000000000000000'
+        $parsed.DownloadedBytes | Should -Be 104857600
+        $parsed.ExpectedBytes | Should -Be 104857600
+        $parsed.TimeoutSeconds | Should -Be 180
+        $parsed.WgetExitCode | Should -Be 0
     }
 
 
@@ -220,7 +224,7 @@ Describe 'ConvertFrom-MeasurementOutput' {
         $raw = @(
             'Freifunk Nordhessen e.V.'
             'Hostname: Test-Node'
-            'speedtest,nodeid=aabbccddeeff download_mbit=10.75,target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+            'speedtest,nodeid=aabbccddeeff download_mbit=10.75 bytes=104857600 sec=78.033210 timeout_seconds=180,target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
         ) -join "`n"
         $parsed = ConvertFrom-MeasurementOutput -RawOutput $raw
 
@@ -236,19 +240,68 @@ Describe 'ConvertFrom-MeasurementOutput' {
 
 
     It 'parses final failed speedtest markers with zero throughput' {
-        $failed = ConvertFrom-MeasurementOutput -RawOutput 'wget_failed,nodeid=001122334455 exit=4 bytes=0 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
-        $invalid = ConvertFrom-MeasurementOutput -RawOutput 'speedtest_invalid,nodeid=001122334455 bytes=0 sec=0 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
-        $mismatch = ConvertFrom-MeasurementOutput -RawOutput 'speedtest_size_mismatch,nodeid=001122334455 bytes=104857599 expected_bytes=104857600 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+        $failed = ConvertFrom-MeasurementOutput -RawOutput 'wget_failed,nodeid=001122334455 exit=4 bytes=0 sec=12.500000 expected_bytes=104857600 timeout_seconds=180 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+        $invalid = ConvertFrom-MeasurementOutput -RawOutput 'speedtest_invalid,nodeid=001122334455 bytes=0 sec=0.000000 expected_bytes=104857600 timeout_seconds=180 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+        $mismatch = ConvertFrom-MeasurementOutput -RawOutput 'speedtest_size_mismatch,nodeid=001122334455 bytes=104857599 sec=179.500000 expected_bytes=104857600 timeout_seconds=180 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+        $timeout = ConvertFrom-MeasurementOutput -RawOutput 'speedtest_timeout,nodeid=001122334455 exit=124 bytes=104857600 sec=180.000321 expected_bytes=104857600 timeout_seconds=180 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
 
         $failed.ResultType | Should -Be 'final_failed'
         $failed.FailureReason | Should -Be 'wget_failed'
         $failed.ThroughputMbit | Should -Be 0
+        $failed.WgetExitCode | Should -Be 4
         $invalid.FailureReason | Should -Be 'speedtest_invalid'
         $mismatch.FailureReason | Should -Be 'speedtest_size_mismatch'
+        $timeout.FailureReason | Should -Be 'speedtest_timeout'
+        $timeout.ThroughputMbit | Should -Be 0
+        $timeout.TimeoutSeconds | Should -Be 180
+        $timeout.DownloadDurationSeconds | Should -BeGreaterThan 180
     }
     It 'returns null for empty payload' {
         $parsed = ConvertFrom-MeasurementOutput -RawOutput ''
         $parsed | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Initialize-Database and Save-Measurement' {
+    It 'stores parsed transfer metadata for failed timeout measurements' {
+        InModuleScope FreifunkMetrics {
+            $baseDir = Join-Path $TestDrive 'db-metadata'
+            New-Item -ItemType Directory -Path $baseDir -Force | Out-Null
+
+            $config = @{
+                DatabasePath = (Join-Path $baseDir 'metrics.db')
+                SQLiteBinary = 'sqlite3'
+                LogDir = $baseDir
+            }
+            $node = [pscustomobject]@{
+                DeviceID = 'node-timeout'
+                Name = 'Timeout Node'
+                IP = '2a03:2260::dead'
+                Domain = 'dom-timeout'
+            }
+            $parsed = [pscustomobject]@{
+                NodeId = '001122334455'
+                ThroughputMbit = 0.0
+                Target = 'https://fsn1-speed.hetzner.com/100MB.bin'
+                TimestampNs = '1772839860'
+                ResultType = 'final_failed'
+                FailureReason = 'speedtest_timeout'
+                DownloadedBytes = 104857600
+                ExpectedBytes = 104857600
+                DownloadDurationSeconds = 180.000321
+                TimeoutSeconds = 180
+                WgetExitCode = 124
+            }
+
+            Mock Write-Log {}
+
+            Initialize-Database -Config $config
+            Save-Measurement -Config $config -Node $node -RunId 'run-timeout' -RawOutput 'speedtest_timeout,nodeid=001122334455 exit=124 bytes=104857600 sec=180.000321 expected_bytes=104857600 timeout_seconds=180 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860' -ParsedMeasurement $parsed
+
+            $row = & sqlite3 $config.DatabasePath "select result_type || '|' || failure_reason || '|' || downloaded_bytes || '|' || expected_bytes || '|' || round(download_duration_seconds,6) || '|' || timeout_seconds || '|' || wget_exit_code from measurements where run_id='run-timeout';"
+            $LASTEXITCODE | Should -Be 0
+            $row | Should -Be 'final_failed|speedtest_timeout|104857600|104857600|180.000321|180|124'
+        }
     }
 }
 
@@ -702,7 +755,7 @@ Describe 'SSH streaming integration' -Tag 'ssh-streaming' {
             $remoteFile = ('{0}/result.txt' -f $remoteRunDir)
             $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $remoteRunDir
             $remoteFileEscaped = Convert-ToShellSingleQuoted -Value $remoteFile
-            $payload = 'speedtest,nodeid=pester download_mbit=12.34,target="https://example.invalid/test.bin" 1772839860'
+            $payload = 'speedtest,nodeid=pester download_mbit=12.34 bytes=104857600 sec=67.979000 timeout_seconds=180,target="https://example.invalid/test.bin" 1772839860'
             $payloadEscaped = Convert-ToShellSingleQuoted -Value $payload
             $sshArgs = New-SshArgs -Config $collectConfig -NodeIp $node.IP
 
@@ -880,7 +933,7 @@ Describe 'Convert-CollectStreamToFiles' {
     It 'parses multiple streamed remote files' {
         $stream = @(
             '__FFMH_FILE_BEGIN__/tmp/harvester/1.txt'
-            'speedtest,nodeid=aabbcc download_mbit=12.34,target="https://example.invalid/test.bin" 123'
+            'speedtest,nodeid=aabbcc download_mbit=12.34 bytes=104857600 sec=67.979000 timeout_seconds=180,target="https://example.invalid/test.bin" 123'
             '__FFMH_FILE_END__/tmp/harvester/1.txt'
             '__FFMH_FILE_BEGIN__/tmp/harvester/2.txt'
             'pending output'
@@ -905,7 +958,7 @@ Describe 'Receive-NodeResults' {
             'if ($command -like ''find*'') {'
             '    @(' 
             '        ''__FFMH_FILE_BEGIN__/tmp/harvester/1700000000.txt'''
-            '        ''speedtest,nodeid=aabbccddeeff download_mbit=48.25,target="https://example.invalid/test.bin" 1700000000000000000'''
+            '        ''speedtest,nodeid=aabbccddeeff download_mbit=48.25 bytes=104857600 sec=17.385922 timeout_seconds=180,target="https://example.invalid/test.bin" 1700000000000000000'''
             '        ''__FFMH_FILE_END__/tmp/harvester/1700000000.txt'''
             '    ) | ForEach-Object { Write-Output $_ }'
             '    exit 0'
@@ -948,7 +1001,7 @@ Describe 'Receive-NodeResults' {
             'if ($command -like ''find*'') {'
             '    @('
             '        ''__FFMH_FILE_BEGIN__/tmp/harvester/1700000000.txt'''
-            '        ''wget_failed,nodeid=aabbccddeeff exit=4 bytes=0 expected_bytes=104857600 target="https://example.invalid/test.bin" 1700000000000000000'''
+            '        ''wget_failed,nodeid=aabbccddeeff exit=4 bytes=0 sec=12.500000 expected_bytes=104857600 timeout_seconds=180 target="https://example.invalid/test.bin" 1700000000000000000'''
             '        ''__FFMH_FILE_END__/tmp/harvester/1700000000.txt'''
             '    ) | ForEach-Object { Write-Output $_ }'
             '    exit 0'
@@ -989,7 +1042,7 @@ Describe 'Receive-NodeResults' {
             'if ($command -like ''find*'') {'
             '    @('
             '        ''__FFMH_FILE_BEGIN__/tmp/harvester/1700000000.txt'''
-            '        ''speedtest,nodeid=aabbccddeeff download_mbit=48.25,target="https://example.invalid/test.bin" 1700000000000000000'''
+            '        ''speedtest,nodeid=aabbccddeeff download_mbit=48.25 bytes=104857600 sec=17.385922 timeout_seconds=180,target="https://example.invalid/test.bin" 1700000000000000000'''
             '        ''__FFMH_FILE_END__/tmp/harvester/1700000000.txt'''
             '        ''__FFMH_FILE_BEGIN__/tmp/harvester/diag-1700000001.txt'''
             '        ''diagnostic,nodeid=aabbccddeeff target_host="example.invalid" speedtest_delay_seconds=10 diagnostic_delay_seconds=70 timestamp=1700000001000000000'''
@@ -1096,7 +1149,7 @@ Describe 'Invoke-NodeCollectBatch' {
             '    $suffix = if ($nodeHost -like ''*::1'') { ''1'' } else { ''2'' }'
             '    @('
             '        "__FFMH_FILE_BEGIN__/tmp/harvester/170000000$suffix.txt"'
-            '        "speedtest,nodeid=node$suffix download_mbit=40.$suffix,target=`"https://example.invalid/test.bin`" 170000000000000000$suffix"'
+            '        "speedtest,nodeid=node$suffix download_mbit=40.$suffix bytes=104857600 sec=20.000000 timeout_seconds=180,target=`"https://example.invalid/test.bin`" 170000000000000000$suffix"'
             '        "__FFMH_FILE_END__/tmp/harvester/170000000$suffix.txt"'
             '    ) | ForEach-Object { Write-Output $_ }'
             '    exit 0'

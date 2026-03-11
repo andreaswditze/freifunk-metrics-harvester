@@ -317,13 +317,19 @@ function Invoke-CollectNodeMetricsMain {
 
                 foreach ($file in $collectedFiles) {
                     $parsed = $file.ParsedMeasurement
+                    $downloadDuration = if ($null -ne $parsed.PSObject.Properties['DownloadDurationSeconds']) { $parsed.DownloadDurationSeconds } else { '' }
+                    $downloadedBytes = if ($null -ne $parsed.PSObject.Properties['DownloadedBytes']) { $parsed.DownloadedBytes } else { '' }
+                    $expectedBytes = if ($null -ne $parsed.PSObject.Properties['ExpectedBytes']) { $parsed.ExpectedBytes } else { '' }
+                    $timeoutSeconds = if ($null -ne $parsed.PSObject.Properties['TimeoutSeconds']) { $parsed.TimeoutSeconds } else { '' }
+                    $wgetExitCode = if ($null -ne $parsed.PSObject.Properties['WgetExitCode']) { $parsed.WgetExitCode } else { '' }
+
                     if ($parsed.ResultType -eq 'success') {
                         $parsedCount++
-                        Write-NodeActionLog -Node $node -Action 'parse_success' -Detail ('nodeid=' + $parsed.NodeId + '; throughput_mbit=' + $parsed.ThroughputMbit + '; source_file=' + $file.LocalPath)
+                        Write-NodeActionLog -Node $node -Action 'parse_success' -Detail ('nodeid=' + $parsed.NodeId + '; throughput_mbit=' + $parsed.ThroughputMbit + '; duration_seconds=' + $downloadDuration + '; bytes=' + $downloadedBytes + '; timeout_seconds=' + $timeoutSeconds + '; source_file=' + $file.LocalPath)
                     }
                     elseif ($parsed.ResultType -eq 'final_failed') {
                         $parsedCount++
-                        Write-NodeActionLog -Node $node -Action 'parse_final_failed' -Detail ('nodeid=' + $parsed.NodeId + '; failure_reason=' + $parsed.FailureReason + '; throughput_mbit=0; source_file=' + $file.LocalPath) -Level WARN
+                        Write-NodeActionLog -Node $node -Action 'parse_final_failed' -Detail ('nodeid=' + $parsed.NodeId + '; failure_reason=' + $parsed.FailureReason + '; throughput_mbit=0; duration_seconds=' + $downloadDuration + '; bytes=' + $downloadedBytes + '; expected_bytes=' + $expectedBytes + '; timeout_seconds=' + $timeoutSeconds + '; wget_exit_code=' + $wgetExitCode + '; source_file=' + $file.LocalPath) -Level WARN
                     }
                     else {
                         Write-NodeActionLog -Node $node -Action 'parse_failed' -Detail ('raw output stored, parser did not match; source_file=' + $file.LocalPath) -Level WARN

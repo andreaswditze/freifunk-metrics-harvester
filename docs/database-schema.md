@@ -60,6 +60,13 @@ Final stored measurements with raw payload.
 - `throughput_mbit` REAL
 - `measurement_timestamp_ns` TEXT
 - `measured_at_utc` TEXT
+- `result_type` TEXT (`success`, `final_failed`)
+- `failure_reason` TEXT
+- `downloaded_bytes` INTEGER
+- `expected_bytes` INTEGER
+- `download_duration_seconds` REAL
+- `timeout_seconds` INTEGER
+- `wget_exit_code` INTEGER
 - `raw_output` TEXT
 - `collected_at_utc` TEXT
 
@@ -106,7 +113,7 @@ The schema also creates operational indexes for the main query paths:
 
 ## Notes
 - Raw files are also stored in `data/raw/<run_id>/`.
-- Final failed speedtest results are also stored in `measurements`; they use `throughput_mbit = 0` and preserve the raw failure payload.
+- Final failed speedtest results are also stored in `measurements`; they use `throughput_mbit = 0` and preserve the raw failure payload plus parsed transfer metadata.
 - Early diagnostics are written to `data/raw/<run_id>/` for all triggered nodes, but only persisted in `node_diagnostics` when the node has no parsed result or the retained throughput is at or below `NodeDiagnosticsKeepThresholdMbit`.
 - Schema initialization runs automatically inside `collect-node-metrics.ps1`.
 - The collect phase waits for parseable result files using polling and a timeout based on `TriggerRandomDelayMaxSeconds + CollectWaitTimeoutSeconds`.

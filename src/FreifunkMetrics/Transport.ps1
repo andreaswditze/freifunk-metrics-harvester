@@ -73,7 +73,7 @@ function Test-NodeResultFinished {
     $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $remoteRunDir
     $probeCmd = @"
 find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while IFS= read -r file; do
-    if grep -Eq '^(speedtest,nodeid=|wget_failed,nodeid=|speedtest_invalid,nodeid=|speedtest_size_mismatch,nodeid=)' "`$file"; then
+    if grep -Eq '^(speedtest,nodeid=|wget_failed,nodeid=|speedtest_invalid,nodeid=|speedtest_size_mismatch,nodeid=|speedtest_timeout,nodeid=)' "`$file"; then
         printf '%s\n' "`$file"
         break
     fi
@@ -388,21 +388,29 @@ if [ "`$wget_exit" = "0" ]; then
     bytes="$targetBytes"
 fi
 rm -f "`$wget_exit_file"
-awk -v nodeid="`$nodeid" -v start="`$start" -v t0="`$t0" -v t1="`$t1" -v target="`$target_url" -v bytes="`$bytes" -v wget_exit="`$wget_exit" -v expected_bytes="$targetBytes" 'BEGIN{
+awk -v nodeid="`$nodeid" -v start="`$start" -v t0="`$t0" -v t1="`$t1" -v target="`$target_url" -v bytes="`$bytes" -v wget_exit="`$wget_exit" -v expected_bytes="$targetBytes" -v timeout_seconds="$downloadTimeoutSeconds" 'BEGIN{
     sec=t1-t0
+    if (sec < 0) {
+        sec = 0
+    }
     if (wget_exit != 0) {
-        printf "wget_failed,nodeid=%s exit=%s bytes=%s expected_bytes=%s target=\"%s\" %s\n",nodeid,wget_exit,bytes,expected_bytes,target,start
+        kind = (wget_exit == 124) ? "speedtest_timeout" : "wget_failed"
+        printf "%s,nodeid=%s exit=%s bytes=%s sec=%.6f expected_bytes=%s timeout_seconds=%s target=\"%s\" %s\n",kind,nodeid,wget_exit,bytes,sec,expected_bytes,timeout_seconds,target,start
         exit 0
     }
     if (bytes <= 0 || sec <= 0) {
-        printf "speedtest_invalid,nodeid=%s bytes=%s sec=%s expected_bytes=%s target=\"%s\" %s\n",nodeid,bytes,sec,expected_bytes,target,start
+        printf "speedtest_invalid,nodeid=%s bytes=%s sec=%.6f expected_bytes=%s timeout_seconds=%s target=\"%s\" %s\n",nodeid,bytes,sec,expected_bytes,timeout_seconds,target,start
         exit 0
     }
     if (bytes != expected_bytes) {
-        printf "speedtest_size_mismatch,nodeid=%s bytes=%s expected_bytes=%s target=\"%s\" %s\n",nodeid,bytes,expected_bytes,target,start
+        printf "speedtest_size_mismatch,nodeid=%s bytes=%s sec=%.6f expected_bytes=%s timeout_seconds=%s target=\"%s\" %s\n",nodeid,bytes,sec,expected_bytes,timeout_seconds,target,start
         exit 0
     }
-    printf "speedtest,nodeid=%s download_mbit=%.2f,target=\"%s\" %s\n",nodeid,(bytes*8)/(sec*1000000),target,start
+    if (sec >= timeout_seconds) {
+        printf "speedtest_timeout,nodeid=%s exit=%s bytes=%s sec=%.6f expected_bytes=%s timeout_seconds=%s target=\"%s\" %s\n",nodeid,wget_exit,bytes,sec,expected_bytes,timeout_seconds,target,start
+        exit 0
+    }
+    printf "speedtest,nodeid=%s download_mbit=%.2f bytes=%s sec=%.6f timeout_seconds=%s,target=\"%s\" %s\n",nodeid,(bytes*8)/(sec*1000000),bytes,sec,timeout_seconds,target,start
 }'
 "@
 
@@ -942,8 +950,8 @@ function ConvertFrom-MeasurementOutput {
         return $null
     }
 
-    $successRegex = '^speedtest,nodeid=(?<nodeid>[^ ]+)\s+download_mbit=(?<download>[0-9]+(?:\.[0-9]+)?),target="(?<target>[^"]+)"\s+(?<timestamp>[0-9]+)$'
-    $failureRegex = '^(?<kind>wget_failed|speedtest_invalid|speedtest_size_mismatch),nodeid=(?<nodeid>[^ ]+)\s+.*target="(?<target>[^"]+)"\s+(?<timestamp>[0-9]+)$'
+    $successRegex = '^speedtest,nodeid=(?<nodeid>[^ ]+)\s+download_mbit=(?<download>[0-9]+(?:\.[0-9]+)?)\s+bytes=(?<bytes>[0-9]+)\s+sec=(?<sec>[0-9]+(?:\.[0-9]+)?)\s+timeout_seconds=(?<timeout>[0-9]+),target="(?<target>[^"]+)"\s+(?<timestamp>[0-9]+)$'
+    $failureRegex = '^(?<kind>wget_failed|speedtest_invalid|speedtest_size_mismatch|speedtest_timeout),nodeid=(?<nodeid>[^ ]+)\s+(?:exit=(?<exit>-?[0-9]+)\s+)?bytes=(?<bytes>[0-9]+)\s+sec=(?<sec>[0-9]+(?:\.[0-9]+)?)\s+expected_bytes=(?<expected>[0-9]+)\s+timeout_seconds=(?<timeout>[0-9]+)\s+target="(?<target>[^"]+)"\s+(?<timestamp>[0-9]+)$'
 
     $lines = @(
         $RawOutput -split '\r?\n' |
@@ -955,24 +963,39 @@ function ConvertFrom-MeasurementOutput {
         $successMatch = [regex]::Match($line, $successRegex)
         if ($successMatch.Success) {
             return [pscustomobject]@{
-                NodeId         = $successMatch.Groups['nodeid'].Value
-                ThroughputMbit = [double]::Parse($successMatch.Groups['download'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
-                Target         = $successMatch.Groups['target'].Value
-                TimestampNs    = $successMatch.Groups['timestamp'].Value
-                ResultType     = 'success'
-                FailureReason  = ''
+                NodeId                  = $successMatch.Groups['nodeid'].Value
+                ThroughputMbit          = [double]::Parse($successMatch.Groups['download'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
+                Target                  = $successMatch.Groups['target'].Value
+                TimestampNs             = $successMatch.Groups['timestamp'].Value
+                ResultType              = 'success'
+                FailureReason           = ''
+                DownloadedBytes         = [int64]$successMatch.Groups['bytes'].Value
+                ExpectedBytes           = [int64]$successMatch.Groups['bytes'].Value
+                DownloadDurationSeconds = [double]::Parse($successMatch.Groups['sec'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
+                TimeoutSeconds          = [int]$successMatch.Groups['timeout'].Value
+                WgetExitCode            = 0
             }
         }
 
         $failureMatch = [regex]::Match($line, $failureRegex)
         if ($failureMatch.Success) {
+            $wgetExitCode = $null
+            if ($failureMatch.Groups['exit'].Success -and -not [string]::IsNullOrWhiteSpace($failureMatch.Groups['exit'].Value)) {
+                $wgetExitCode = [int]$failureMatch.Groups['exit'].Value
+            }
+
             return [pscustomobject]@{
-                NodeId         = $failureMatch.Groups['nodeid'].Value
-                ThroughputMbit = 0.0
-                Target         = $failureMatch.Groups['target'].Value
-                TimestampNs    = $failureMatch.Groups['timestamp'].Value
-                ResultType     = 'final_failed'
-                FailureReason  = $failureMatch.Groups['kind'].Value
+                NodeId                  = $failureMatch.Groups['nodeid'].Value
+                ThroughputMbit          = 0.0
+                Target                  = $failureMatch.Groups['target'].Value
+                TimestampNs             = $failureMatch.Groups['timestamp'].Value
+                ResultType              = 'final_failed'
+                FailureReason           = $failureMatch.Groups['kind'].Value
+                DownloadedBytes         = [int64]$failureMatch.Groups['bytes'].Value
+                ExpectedBytes           = [int64]$failureMatch.Groups['expected'].Value
+                DownloadDurationSeconds = [double]::Parse($failureMatch.Groups['sec'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
+                TimeoutSeconds          = [int]$failureMatch.Groups['timeout'].Value
+                WgetExitCode            = $wgetExitCode
             }
         }
     }
