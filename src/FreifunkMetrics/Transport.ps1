@@ -360,7 +360,7 @@ start=`$(date +%s%N)
 wget_exit_file="/tmp/harvester-wget-exit-`$$.txt"
 rm -f "`$wget_exit_file"
 t0=`$(date +%s.%N)
-wget -O /dev/null -q -T $downloadTimeoutSeconds -t 1 "`$target_url" &
+wget -O /dev/null -q -T $downloadTimeoutSeconds "`$target_url" &
 wget_pid=`$!
 (
     sleep $downloadTimeoutSeconds
