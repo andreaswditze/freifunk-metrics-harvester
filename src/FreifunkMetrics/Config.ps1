@@ -48,6 +48,7 @@ function Get-EnvironmentConfig {
         TriggerParallelism                = 10
         CollectParallelism                = 10
         TriggerRandomDelayMaxSeconds      = 600
+        CollectWaitTimeoutSeconds         = 300
         SpeedtestTargetUrl                = 'https://fsn1-speed.hetzner.com/100MB.bin'
         SpeedtestTargetBytes              = 104857600
         EnableNodeDiagnostics             = $true
@@ -172,6 +173,17 @@ function Assert-ValidConfig {
 
     if ($Config.TriggerRandomDelayMaxSeconds -lt 0) {
         throw 'Config value TriggerRandomDelayMaxSeconds must be zero or greater.'
+    }
+
+    try {
+        $Config.CollectWaitTimeoutSeconds = [int]$Config.CollectWaitTimeoutSeconds
+    }
+    catch {
+        throw 'Config value CollectWaitTimeoutSeconds must be an integer.'
+    }
+
+    if ($Config.CollectWaitTimeoutSeconds -lt 1) {
+        throw 'Config value CollectWaitTimeoutSeconds must be at least 1.'
     }
 
     try {

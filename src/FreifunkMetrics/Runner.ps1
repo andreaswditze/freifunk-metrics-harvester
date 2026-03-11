@@ -206,12 +206,13 @@ function Invoke-CollectNodeMetricsMain {
         }
         Write-Progress -Id 1 -Activity 'Triggering nodes' -Completed
 
-        $waitSeconds = [Math]::Max(0, [int]$config.TriggerRandomDelayMaxSeconds) * 2
-        if ($waitSeconds -gt 0 -and $triggeredNodes.Count -gt 0) {
-            Write-Log -Message "Waiting $waitSeconds seconds before collect phase"
-            Wait-WithProgress -Seconds $waitSeconds -Activity 'Waiting for randomized download starts' -Config $config -RunId $RunId -Nodes @($triggeredNodes.ToArray())
+        $collectWaitTimeoutSeconds = if ($config.ContainsKey('CollectWaitTimeoutSeconds')) { [Math]::Max(1, [int]$config.CollectWaitTimeoutSeconds) } else { 300 }
+        $waitSeconds = [Math]::Max(0, [int]$config.TriggerRandomDelayMaxSeconds) + $collectWaitTimeoutSeconds
+        if ($triggeredNodes.Count -gt 0) {
+            Write-Log -Message "Waiting up to $waitSeconds seconds for node results before collect phase"
+            Wait-WithProgress -Seconds $waitSeconds -Activity 'Waiting for node results' -Config $config -RunId $RunId -Nodes @($triggeredNodes.ToArray())
         }
-        elseif ($waitSeconds -gt 0) {
+        else {
             Write-Log -Level WARN -Message 'Skipping wait phase because no nodes were triggered successfully.'
         }
 
