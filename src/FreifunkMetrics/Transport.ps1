@@ -34,6 +34,36 @@ function New-SshArgs {
     )
 }
 
+function Invoke-SshShellScript {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$NodeIp,
+        [Parameter(Mandatory = $true)]
+        [string]$ScriptContent
+    )
+
+    $sshArgs = New-SshArgs -Config $Config -NodeIp $NodeIp
+    $scriptText = [string]$ScriptContent
+    if (-not $scriptText.EndsWith("`n")) {
+        $scriptText += "`n"
+    }
+
+    # Stream large trigger payloads over stdin so the SSH exec request stays small.
+    $output = $scriptText | & $Config.SshBinary @sshArgs 'sh -s' 2>&1
+    $exitCode = $LASTEXITCODE
+    if ($null -eq $exitCode) {
+        $exitCode = if ($?) { 0 } else { 1 }
+    }
+
+    return [pscustomobject]@{
+        Output   = if ($null -eq $output) { @() } else { @($output) }
+        ExitCode = [int]$exitCode
+    }
+}
+
 function Get-RemoteRunResultDir {
     [CmdletBinding()]
     param(
@@ -1006,9 +1036,9 @@ function Invoke-NodeTriggerCommand {
     )
 
     $triggerInfo = Get-NodeTriggerCommandInfo -Config $Config -RunId $RunId -AssignedDelaySeconds $AssignedDelaySeconds
-    $sshArgs = New-SshArgs -Config $Config -NodeIp $Node.IP
-    $output = & $Config.SshBinary @sshArgs $triggerInfo.TriggerCommand 2>&1
-    $exitCode = $LASTEXITCODE
+    $invocation = Invoke-SshShellScript -Config $Config -NodeIp $Node.IP -ScriptContent $triggerInfo.TriggerCommand
+    $output = $invocation.Output
+    $exitCode = $invocation.ExitCode
 
     if ($exitCode -ne 0) {
         return [pscustomobject]@{
@@ -1072,7 +1102,7 @@ function Invoke-NodeTriggerBatch {
         return
     }
 
-    $sshHostKeyArgs = Get-SshHostKeyArgs
+    $modulePath = $script:ModuleFilePath
     $throttle = [Math]::Min($parallelism, $triggerAssignments.Count)
 
     $triggerAssignments |
@@ -1081,21 +1111,13 @@ function Invoke-NodeTriggerBatch {
             $node = $item.Node
             $config = $using:Config
             $triggerInfo = $item.TriggerInfo
+            $modulePath = $using:modulePath
 
-            $sshHostKeyArgs = $using:sshHostKeyArgs
-            $sshArgs = @(
-                '-i', $config.SshKeyPath,
-                '-o', 'BatchMode=yes',
-                '-o', "ConnectTimeout=$($config.SshConnectTimeoutSeconds)"
-            ) + $sshHostKeyArgs + @(
-                "$($config.SshUser)@$($node.IP)"
-            )
+            Import-Module $modulePath -Force | Out-Null
 
-            $output = & $config.SshBinary @sshArgs $triggerInfo.TriggerCommand 2>&1
-            $exitCode = $LASTEXITCODE
-            if ($null -eq $output) {
-                $output = @()
-            }
+            $invocation = Invoke-SshShellScript -Config $config -NodeIp $node.IP -ScriptContent $triggerInfo.TriggerCommand
+            $output = $invocation.Output
+            $exitCode = $invocation.ExitCode
 
             $triggerResult = if ($exitCode -eq 0) {
                 [pscustomobject]@{

@@ -1018,6 +1018,110 @@ Describe 'Invoke-NodeTriggerBatch' {
         }
     }
 }
+Describe 'Invoke-NodeTriggerBatch' {
+    It 'streams trigger payloads over stdin in parallel mode' {
+        $captureDir = Join-Path $TestDrive 'trigger-batch-capture'
+        New-Item -ItemType Directory -Path $captureDir -Force | Out-Null
+
+        $mockSsh = Join-Path $TestDrive 'mock-ssh-trigger-batch.ps1'
+        @(
+            '$payload = @($input) -join ""'
+            '$nodeHost = $args[-2]'
+            '$safeName = ($nodeHost -replace ''[^A-Za-z0-9_.-]'', ''_'')'
+            '@('
+            '    "LASTARG=$($args[-1])"'
+            '    $payload'
+            ') | Set-Content -Path (Join-Path $env:FFMH_TRIGGER_CAPTURE_DIR ($safeName + ''.txt''))'
+            'exit 0'
+        ) | Set-Content -Path $mockSsh
+
+        $config = @{
+            SshBinary = $mockSsh
+            SshKeyPath = 'ignore'
+            SshUser = 'root'
+            SshConnectTimeoutSeconds = 1
+            RemoteResultDir = '/tmp/harvester'
+            TriggerParallelism = 2
+            TriggerRandomDelayMaxSeconds = 0
+            SpeedtestTargetUrl = 'https://example.invalid/test.bin'
+            SpeedtestTargetBytes = 104857600
+            EnableNodeDiagnostics = $true
+            NodeDiagnosticsDelaySeconds = 60
+        }
+        $nodes = @(
+            [pscustomobject]@{ DeviceID = 'node-001'; Name = 'Node 1'; IP = '2a03:2260::1'; Domain = 'dom-a' }
+            [pscustomobject]@{ DeviceID = 'node-002'; Name = 'Node 2'; IP = '2a03:2260::2'; Domain = 'dom-b' }
+        )
+
+        $env:FFMH_TRIGGER_CAPTURE_DIR = $captureDir
+        try {
+            $results = @(Invoke-NodeTriggerBatch -Config $config -Nodes $nodes -RunId 'run-batch')
+        }
+        finally {
+            Remove-Item Env:FFMH_TRIGGER_CAPTURE_DIR -ErrorAction SilentlyContinue
+        }
+
+        $sorted = @($results | Sort-Object { $_.Node.DeviceID })
+        $sorted.Count | Should -Be 2
+        @($sorted | ForEach-Object { $_.TriggerResult.Triggered }) | Should -Be @($true, $true)
+
+        $captures = @(Get-ChildItem -Path $captureDir -File | Sort-Object Name)
+        $captures.Count | Should -Be 2
+        foreach ($capture in $captures) {
+            $content = Get-Content -Raw -Path $capture.FullName
+            $content | Should -Match '^LASTARG=sh -s'
+            $content | Should -Match "target_url='https://example\.invalid/test\.bin'"
+            $content | Should -Match 'delay_seconds=0'
+        }
+    }
+}
+
+Describe 'Invoke-NodeTriggerCommand' {
+    It 'streams trigger payloads over stdin so SSH command arguments stay short' {
+        $capturePath = Join-Path $TestDrive 'trigger-stdin.txt'
+        $mockSsh = Join-Path $TestDrive 'mock-ssh-trigger-stdin.ps1'
+        @(
+            '$payload = @($input) -join ""'
+            '@('
+            '    "LASTARG=$($args[-1])"'
+            '    "HOST=$($args[-2])"'
+            '    "PAYLOAD_BEGIN"'
+            '    $payload'
+            '    "PAYLOAD_END"'
+            ') | Set-Content -Path $env:FFMH_TRIGGER_CAPTURE_PATH'
+            'exit 0'
+        ) | Set-Content -Path $mockSsh
+
+        $config = @{
+            SshBinary = $mockSsh
+            SshKeyPath = 'ignore'
+            SshUser = 'root'
+            SshConnectTimeoutSeconds = 1
+            RemoteResultDir = '/tmp/harvester'
+            SpeedtestTargetUrl = 'https://example.invalid/test.bin'
+            SpeedtestTargetBytes = 104857600
+            EnableNodeDiagnostics = $true
+            NodeDiagnosticsDelaySeconds = 60
+        }
+        $node = [pscustomobject]@{ DeviceID = 'node-001'; Name = 'Node 1'; IP = '2a03:2260::1'; Domain = 'dom-a' }
+
+        $env:FFMH_TRIGGER_CAPTURE_PATH = $capturePath
+        try {
+            $result = Invoke-NodeTriggerCommand -Config $config -Node $node -RunId 'run-stdin' -AssignedDelaySeconds 17
+        }
+        finally {
+            Remove-Item Env:FFMH_TRIGGER_CAPTURE_PATH -ErrorAction SilentlyContinue
+        }
+
+        $capture = Get-Content -Raw -Path $capturePath
+        $result.Reachable | Should -BeTrue
+        $result.Triggered | Should -BeTrue
+        $capture | Should -Match '^LASTARG=sh -s'
+        $capture | Should -Match 'HOST=root@2a03:2260::1'
+        $capture | Should -Match 'delay_seconds=17'
+        $capture | Should -Match "diag_out='/tmp/harvester/run-stdin/diag-'"
+    }
+}
 Describe 'Get-NodeTriggerCommandInfo' {
     It 'uses controller-assigned delay and target settings' {
         $config = @{
