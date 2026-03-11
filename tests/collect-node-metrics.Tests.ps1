@@ -666,7 +666,7 @@ Describe 'Get-NodeTriggerCommandInfo' {
         $info.TriggerCommand | Should -Match 'target_url=''https://example\.invalid/testfile\.bin'''
         $info.TriggerCommand | Should -Match 'wget_exit_file='
         $info.TriggerCommand | Should -Match 'wget -O /dev/null -q'
-        $info.TriggerCommand | Should -Match 'wget_pid=\\$!'
+        $info.TriggerCommand | Should -Match 'wget_pid=\$!'
         $info.TriggerCommand | Should -Match "printf '%s' '124' > "
         $info.TriggerCommand | Should -Match 'expected_bytes="?123456789"?'
         $info.TriggerCommand | Should -Match 'speedtest_size_mismatch,nodeid='
@@ -1136,4 +1136,5 @@ Describe 'Invoke-NodeCollectBatch' {
         @($sorted[1].CollectResult.Files).Count | Should -Be 1
     }
 }
+
 
