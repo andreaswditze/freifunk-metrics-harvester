@@ -235,7 +235,7 @@ Describe 'Invoke-CollectNodeMetricsMain' {
                 LocalPath = 'diag-fast.txt'
                 RawOutput = @(
                     'diagnostic,nodeid=cc target_host="example.invalid" speedtest_delay_seconds=30 diagnostic_delay_seconds=90 timestamp=1772839800'
-                    'diag_summary,load1=0.10 load5=0.20 load15=0.30 gateway_probe="fe80::1" gateway_probe_kind="ipv6" ping_gateway_loss=0 ping_target_loss=0 target_ipv4="192.0.2.10" target_ipv6="2001:db8::10" route_get_ipv4="192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20" route_get_ipv6="2001:db8::10 from 2001:db8::20 via fe80::1 dev br-client" wget_stderr="wget: connection reset by peer"'
+                    'diag_summary,load1=0.10 load5=0.20 load15=0.30 gateway_probe="fe80::1" gateway_probe_kind="ipv6" ping_gateway_loss=0 ping_target_loss=0 target_ipv4="192.0.2.10" target_ipv6="2001:db8::10" route_get_ipv4="192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20" route_get_ipv6="2001:db8::10 from 2001:db8::20 via fe80::1 dev br-client" wget_stderr="wget: connection reset by peer" tcp_gateway_probe_port=53 tcp_gateway_probe_result="success" tcp_target_probe_port=443 tcp_target_probe_result="exit_1"'
                     'diag_section,name=target_resolution'
                     'Name: example.invalid'
                     'Address 1: 192.0.2.10'
@@ -243,6 +243,27 @@ Describe 'Invoke-CollectNodeMetricsMain' {
                     'diag_section,name=route_get'
                     '192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'
                     'diag_section_end,name=route_get'
+                    'diag_section,name=tcp_gateway_probe'
+                    'target=fe80::1%br-client port=53 result=success'
+                    'Connection to fe80::1%br-client 53 port [tcp/domain] succeeded!'
+                    'diag_section_end,name=tcp_gateway_probe'
+                    'diag_section,name=tcp_target_probe'
+                    'target=2001:db8::10 port=443 result=exit_1'
+                    'nc: connection timed out'
+                    'diag_section_end,name=tcp_target_probe'
+                    'diag_section,name=ip_rule'
+                    '0: from all lookup local'
+                    '1000: from all lookup main'
+                    'diag_section_end,name=ip_rule'
+                    'diag_section,name=batctl_if'
+                    'wlan0: active'
+                    'mesh0: active'
+                    'diag_section_end,name=batctl_if'
+                    'diag_section,name=batctl_n'
+                    '[B.A.T.M.A.N. adv 2024.0, MainIF/MAC: wlan0/02:00:00:00:00:01 (mesh0 BATMAN_V)]'
+                    'IF             Neighbor              last-seen'
+                    'wlan0          02:11:22:33:44:55    0.420s'
+                    'diag_section_end,name=batctl_n'
                     'diag_section,name=ubus_network_dump'
                     '{"interface":[]}'
                     'diag_section_end,name=ubus_network_dump'
@@ -271,8 +292,17 @@ Describe 'Invoke-CollectNodeMetricsMain' {
                     RouteGetIPv4 = '192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'
                     RouteGetIPv6 = '2001:db8::10 from 2001:db8::20 via fe80::1 dev br-client'
                     WgetStderr = 'wget: connection reset by peer'
+                    TcpGatewayProbePort = 53
+                    TcpGatewayProbeResult = 'success'
+                    TcpTargetProbePort = 443
+                    TcpTargetProbeResult = 'exit_1'
                     TargetResolution = "Name: example.invalid`nAddress 1: 192.0.2.10"
                     RouteGet = '192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'
+                    TcpGatewayProbe = "target=fe80::1%br-client port=53 result=success`nConnection to fe80::1%br-client 53 port [tcp/domain] succeeded!"
+                    TcpTargetProbe = "target=2001:db8::10 port=443 result=exit_1`nnc: connection timed out"
+                    IpRule = "0: from all lookup local`n1000: from all lookup main"
+                    BatctlIf = "wlan0: active`nmesh0: active"
+                    BatctlN = "[B.A.T.M.A.N. adv 2024.0, MainIF/MAC: wlan0/02:00:00:00:00:01 (mesh0 BATMAN_V)]`nIF             Neighbor              last-seen`nwlan0          02:11:22:33:44:55    0.420s"
                     UbusNetworkDump = '{"interface":[]}'
                     UbusIfstatusWan = '{"up":true}'
                     UbusIfstatusWan6 = '{"up":false}'
@@ -319,7 +349,11 @@ Describe 'Invoke-CollectNodeMetricsMain' {
                     $Diagnostic.NodeId -eq 'cc' -and
                     $Diagnostic.TargetHost -eq 'example.invalid' -and
                     $Diagnostic.TargetIPv4 -eq '192.0.2.10' -and
-                    $Diagnostic.WgetStderr -eq 'wget: connection reset by peer'
+                    $Diagnostic.WgetStderr -eq 'wget: connection reset by peer' -and
+                    $Diagnostic.TcpGatewayProbeResult -eq 'success' -and
+                    $Diagnostic.TcpTargetProbeResult -eq 'exit_1' -and
+                    $Diagnostic.IpRule -eq "0: from all lookup local`n1000: from all lookup main" -and
+                    $Diagnostic.BatctlN -like '*02:11:22:33:44:55*'
                 }
                 Assert-MockCalled Write-NodeActionLog -Times 1 -ParameterFilter {
                     $Node.DeviceID -eq 'node-020' -and
@@ -392,6 +426,23 @@ Describe 'ConvertFrom-MeasurementOutput' {
         $timeout.TimeoutSeconds | Should -Be 180
         $timeout.DownloadDurationSeconds | Should -BeGreaterThan 180
     }
+
+    It 'parses wget metadata sections for failed results' {
+        $raw = @(
+            'wget_failed,nodeid=001122334455 exit=4 bytes=0 sec=12.500000 expected_bytes=104857600 timeout_seconds=180 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+            'measurement_meta,wget_exit_reason="network_failure" wget_exit_code=4'
+            'measurement_section,name=wget_stderr'
+            'wget: connection reset by peer'
+            'operation aborted'
+            'measurement_section_end,name=wget_stderr'
+        ) -join "`n"
+
+        $parsed = ConvertFrom-MeasurementOutput -RawOutput $raw
+
+        $parsed.WgetExitCode | Should -Be 4
+        $parsed.WgetExitReason | Should -Be 'network_failure'
+        $parsed.WgetStderr | Should -Be "wget: connection reset by peer`noperation aborted"
+    }
     It 'parses a complete download at the exact timeout as success' {
         $parsed = ConvertFrom-MeasurementOutput -RawOutput 'speedtest,nodeid=001122334455 download_mbit=1.75 bytes=104857600 sec=480.000000 timeout_seconds=480,target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
 
@@ -437,16 +488,25 @@ Describe 'Initialize-Database and Save-Measurement' {
                 DownloadDurationSeconds = 180.000321
                 TimeoutSeconds = 180
                 WgetExitCode = 124
+                WgetExitReason = 'watchdog_timeout'
+                WgetStderr = "wget: TLS handshake failed`nretrying..."
             }
 
             Mock Write-Log {}
 
             Initialize-Database -Config $config
-            Save-Measurement -Config $config -Node $node -RunId 'run-timeout' -RawOutput 'speedtest_timeout,nodeid=001122334455 exit=124 bytes=104857600 sec=180.000321 expected_bytes=104857600 timeout_seconds=180 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860' -ParsedMeasurement $parsed
+            Save-Measurement -Config $config -Node $node -RunId 'run-timeout' -RawOutput (@(
+                'speedtest_timeout,nodeid=001122334455 exit=124 bytes=104857600 sec=180.000321 expected_bytes=104857600 timeout_seconds=180 target="https://fsn1-speed.hetzner.com/100MB.bin" 1772839860'
+                'measurement_meta,wget_exit_reason="watchdog_timeout" wget_exit_code=124'
+                'measurement_section,name=wget_stderr'
+                'wget: TLS handshake failed'
+                'retrying...'
+                'measurement_section_end,name=wget_stderr'
+            ) -join "`n") -ParsedMeasurement $parsed
 
-            $row = & sqlite3 $config.DatabasePath "select result_type || '|' || failure_reason || '|' || downloaded_bytes || '|' || expected_bytes || '|' || round(download_duration_seconds,6) || '|' || timeout_seconds || '|' || wget_exit_code from measurements where run_id='run-timeout';"
+            $row = & sqlite3 $config.DatabasePath "select result_type || '|' || failure_reason || '|' || downloaded_bytes || '|' || expected_bytes || '|' || round(download_duration_seconds,6) || '|' || timeout_seconds || '|' || wget_exit_code || '|' || wget_exit_reason || '|' || replace(wget_stderr, char(10), '<n>') from measurements where run_id='run-timeout';"
             $LASTEXITCODE | Should -Be 0
-            $row | Should -Be 'final_failed|speedtest_timeout|104857600|104857600|180.000321|180|124'
+            $row | Should -Be 'final_failed|speedtest_timeout|104857600|104857600|180.000321|180|124|watchdog_timeout|wget: TLS handshake failed<n>retrying...'
         }
     }
 
@@ -476,6 +536,10 @@ Describe 'Initialize-Database and Save-Measurement' {
                 GatewayProbeKind = 'ipv6'
                 PingGatewayLossPct = 0
                 PingTargetLossPct = 25
+                TcpGatewayProbePort = 53
+                TcpGatewayProbeResult = 'success'
+                TcpTargetProbePort = 443
+                TcpTargetProbeResult = 'exit_1'
                 Load1 = 0.12
                 Load5 = 0.34
                 Load15 = 0.56
@@ -486,6 +550,11 @@ Describe 'Initialize-Database and Save-Measurement' {
                 WgetStderr = 'wget: connection reset by peer'
                 TargetResolution = 'Name: ash-speed.hetzner.com Address 1: 192.0.2.10'
                 RouteGet = '192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'
+                TcpGatewayProbe = 'target=fe80::1%br-client port=53 result=success'
+                TcpTargetProbe = 'target=2001:db8::10 port=443 result=exit_1'
+                IpRule = '0: from all lookup local'
+                BatctlIf = 'wlan0: active'
+                BatctlN = 'wlan0 02:11:22:33:44:55 0.420s'
                 UbusNetworkDump = '{"interface":[]}'
                 UbusIfstatusWan = '{"up":true}'
                 UbusIfstatusWan6 = '{"up":false}'
@@ -498,9 +567,9 @@ Describe 'Initialize-Database and Save-Measurement' {
             Initialize-Database -Config $config
             Save-NodeDiagnostic -Config $config -Node $node -RunId 'run-diagnostic' -Diagnostic $diagnostic
 
-            $row = & sqlite3 $config.DatabasePath "select target_ipv4 || '|' || target_ipv6 || '|' || route_get_ipv4 || '|' || wget_stderr || '|' || target_resolution || '|' || ubus_ifstatus_wan6 from node_diagnostics where run_id='run-diagnostic';"
+            $row = & sqlite3 $config.DatabasePath "select target_ipv4 || '|' || target_ipv6 || '|' || route_get_ipv4 || '|' || wget_stderr || '|' || tcp_gateway_probe_port || '|' || tcp_gateway_probe_result || '|' || tcp_target_probe_port || '|' || tcp_target_probe_result || '|' || target_resolution || '|' || ip_rule || '|' || batctl_if || '|' || batctl_n || '|' || ubus_ifstatus_wan6 from node_diagnostics where run_id='run-diagnostic';"
             $LASTEXITCODE | Should -Be 0
-            $row | Should -Be '192.0.2.10|2001:db8::10|192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20|wget: connection reset by peer|Name: ash-speed.hetzner.com Address 1: 192.0.2.10|{"up":false}'
+            $row | Should -Be '192.0.2.10|2001:db8::10|192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20|wget: connection reset by peer|53|success|443|exit_1|Name: ash-speed.hetzner.com Address 1: 192.0.2.10|0: from all lookup local|wlan0: active|wlan0 02:11:22:33:44:55 0.420s|{"up":false}'
         }
     }
 }
@@ -509,7 +578,7 @@ Describe 'ConvertFrom-NodeDiagnosticOutput' {
     It 'parses diagnostic summary payloads' {
         $raw = @(
             'diagnostic,nodeid=aabbccddeeff target_host="ash-speed.hetzner.com" speedtest_delay_seconds=30 diagnostic_delay_seconds=90 timestamp=1772839860'
-            'diag_summary,load1=0.12 load5=0.34 load15=0.56 gateway_probe="fe80::1" gateway_probe_kind="ipv6" ping_gateway_loss=0 ping_target_loss=25 target_ipv4="192.0.2.10" target_ipv6="2001:db8::10" route_get_ipv4="192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20" route_get_ipv6="2001:db8::10 from 2001:db8::20 via fe80::1 dev br-client" wget_stderr="wget: connection reset by peer"'
+            'diag_summary,load1=0.12 load5=0.34 load15=0.56 gateway_probe="fe80::1" gateway_probe_kind="ipv6" ping_gateway_loss=0 ping_target_loss=25 target_ipv4="192.0.2.10" target_ipv6="2001:db8::10" route_get_ipv4="192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20" route_get_ipv6="2001:db8::10 from 2001:db8::20 via fe80::1 dev br-client" wget_stderr="wget: connection reset by peer" tcp_gateway_probe_port=53 tcp_gateway_probe_result="success" tcp_target_probe_port=443 tcp_target_probe_result="exit_1"'
             'diag_section,name=ip_route'
             'default via 192.0.2.1 dev eth0'
             'diag_section_end,name=ip_route'
@@ -520,6 +589,27 @@ Describe 'ConvertFrom-NodeDiagnosticOutput' {
             'diag_section,name=route_get'
             '192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'
             'diag_section_end,name=route_get'
+            'diag_section,name=tcp_gateway_probe'
+            'target=fe80::1%br-client port=53 result=success'
+            'Connection to fe80::1%br-client 53 port [tcp/domain] succeeded!'
+            'diag_section_end,name=tcp_gateway_probe'
+            'diag_section,name=tcp_target_probe'
+            'target=2001:db8::10 port=443 result=exit_1'
+            'nc: connection timed out'
+            'diag_section_end,name=tcp_target_probe'
+            'diag_section,name=ip_rule'
+            '0: from all lookup local'
+            '1000: from all lookup main'
+            'diag_section_end,name=ip_rule'
+            'diag_section,name=batctl_if'
+            'wlan0: active'
+            'mesh0: active'
+            'diag_section_end,name=batctl_if'
+            'diag_section,name=batctl_n'
+            '[B.A.T.M.A.N. adv 2024.0, MainIF/MAC: wlan0/02:00:00:00:00:01 (mesh0 BATMAN_V)]'
+            'IF             Neighbor              last-seen'
+            'wlan0          02:11:22:33:44:55    0.420s'
+            'diag_section_end,name=batctl_n'
             'diag_section,name=ubus_network_dump'
             '{"interface":[]}'
             'diag_section_end,name=ubus_network_dump'
@@ -545,7 +635,16 @@ Describe 'ConvertFrom-NodeDiagnosticOutput' {
         $parsed.TargetIPv6 | Should -Be '2001:db8::10'
         $parsed.RouteGetIPv4 | Should -Be '192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'
         $parsed.WgetStderr | Should -Be 'wget: connection reset by peer'
+        $parsed.TcpGatewayProbePort | Should -Be 53
+        $parsed.TcpGatewayProbeResult | Should -Be 'success'
+        $parsed.TcpTargetProbePort | Should -Be 443
+        $parsed.TcpTargetProbeResult | Should -Be 'exit_1'
         $parsed.TargetResolution | Should -Be "Name: ash-speed.hetzner.com`nAddress 1: 192.0.2.10"
+        $parsed.TcpGatewayProbe | Should -Match 'result=success'
+        $parsed.TcpTargetProbe | Should -Match 'result=exit_1'
+        $parsed.IpRule | Should -Be "0: from all lookup local`n1000: from all lookup main"
+        $parsed.BatctlIf | Should -Be "wlan0: active`nmesh0: active"
+        $parsed.BatctlN | Should -Match '02:11:22:33:44:55'
         $parsed.UbusIfstatusWan6 | Should -Be '{"up":false}'
     }
 }
@@ -944,6 +1043,17 @@ Describe 'Get-NodeTriggerCommandInfo' {
         $info.TriggerCommand | Should -Match 'wget_pid=\$!'
         $info.TriggerCommand | Should -Match "printf '%s' '124' > "
         $info.TriggerCommand | Should -Match 'expected_bytes="?123456789"?'
+        $info.TriggerCommand | Should -Match 'measurement_meta,wget_exit_reason='
+        $info.TriggerCommand | Should -Match 'measurement_section,name=wget_stderr'
+        $info.TriggerCommand | Should -Match 'ip -6 route get'
+        $info.TriggerCommand | Should -Match 'tcp_gateway_probe_port=53'
+        $info.TriggerCommand | Should -Match 'tcp_gateway_probe_result='
+        $info.TriggerCommand | Should -Match 'tcp_target_probe_port=443'
+        $info.TriggerCommand | Should -Match 'tcp_target_probe_result='
+        $info.TriggerCommand | Should -Match 'diag_section,name=tcp_gateway_probe'
+        $info.TriggerCommand | Should -Match 'diag_section,name=tcp_target_probe'
+        $info.TriggerCommand | Should -Match 'nc -6 -z -w 5'
+        $info.TriggerCommand | Should -Match 'ip rule'
         $info.TriggerCommand | Should -Match 'speedtest_size_mismatch,nodeid='
     }
 }
@@ -1059,6 +1169,7 @@ Describe 'Assert-ValidConfig' {
             CollectWaitTimeoutSeconds = '300'
             SpeedtestDownloadTimeoutSeconds = '480'
             SpeedtestTargetBytes = '104857600'
+            NodeDiagnosticsGatewayTcpProbePort = '53'
             ExcelInputFiles = @('nodes.csv', '', $null)
             ExcelInputDirectories = @('/tmp/nodes', ' ')
             ExcelSearchRecurse = $true
@@ -1077,6 +1188,7 @@ Describe 'Assert-ValidConfig' {
         $config.CollectWaitTimeoutSeconds | Should -Be 300
         $config.SpeedtestDownloadTimeoutSeconds | Should -Be 480
         $config.SpeedtestTargetBytes | Should -Be 104857600
+        $config.NodeDiagnosticsGatewayTcpProbePort | Should -Be 53
         $config.ExcelInputFiles | Should -Be @('nodes.csv')
         $config.ExcelInputDirectories | Should -Be @('/tmp/nodes')
         $config.TestNodeIPs | Should -Be @('2a03:2260::1')
@@ -1270,7 +1382,7 @@ Describe 'Receive-NodeResults' {
             '        ''__FFMH_FILE_END__/tmp/harvester/1700000000.txt'''
             '        ''__FFMH_FILE_BEGIN__/tmp/harvester/diag-1700000001.txt'''
             '        ''diagnostic,nodeid=aabbccddeeff target_host="example.invalid" speedtest_delay_seconds=10 diagnostic_delay_seconds=70 timestamp=1700000001000000000'''
-            '        ''diag_summary,load1=0.12 load5=0.23 load15=0.34 gateway_probe="192.0.2.1" gateway_probe_kind="ipv4" ping_gateway_loss=0 ping_target_loss=100 target_ipv4="192.0.2.10" target_ipv6="2001:db8::10" route_get_ipv4="192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20" route_get_ipv6="2001:db8::10 from 2001:db8::20 via fe80::1 dev br-client" wget_stderr="wget: connection reset by peer"'''
+            '        ''diag_summary,load1=0.12 load5=0.23 load15=0.34 gateway_probe="192.0.2.1" gateway_probe_kind="ipv4" ping_gateway_loss=0 ping_target_loss=100 target_ipv4="192.0.2.10" target_ipv6="2001:db8::10" route_get_ipv4="192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20" route_get_ipv6="2001:db8::10 from 2001:db8::20 via fe80::1 dev br-client" wget_stderr="wget: connection reset by peer" tcp_gateway_probe_port=53 tcp_gateway_probe_result="success" tcp_target_probe_port=443 tcp_target_probe_result="exit_1"'''
             '        ''diag_section,name=target_resolution'''
             '        ''Name: example.invalid'''
             '        ''Address 1: 192.0.2.10'''
@@ -1278,6 +1390,23 @@ Describe 'Receive-NodeResults' {
             '        ''diag_section,name=route_get'''
             '        ''192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'''
             '        ''diag_section_end,name=route_get'''
+            '        ''diag_section,name=tcp_gateway_probe'''
+            '        ''target=192.0.2.1 port=53 result=success'''
+            '        ''Connection to 192.0.2.1 53 port [tcp/domain] succeeded!'''
+            '        ''diag_section_end,name=tcp_gateway_probe'''
+            '        ''diag_section,name=tcp_target_probe'''
+            '        ''target=192.0.2.10 port=443 result=exit_1'''
+            '        ''nc: connection timed out'''
+            '        ''diag_section_end,name=tcp_target_probe'''
+            '        ''diag_section,name=ip_rule'''
+            '        ''0: from all lookup local'''
+            '        ''diag_section_end,name=ip_rule'''
+            '        ''diag_section,name=batctl_if'''
+            '        ''wlan0: active'''
+            '        ''diag_section_end,name=batctl_if'''
+            '        ''diag_section,name=batctl_n'''
+            '        ''wlan0 02:11:22:33:44:55 0.420s'''
+            '        ''diag_section_end,name=batctl_n'''
             '        ''diag_section,name=ubus_network_dump'''
             '        ''{"interface":[]}'''
             '        ''diag_section_end,name=ubus_network_dump'''
@@ -1322,6 +1451,11 @@ Describe 'Receive-NodeResults' {
         $diagnostics[0].ParsedDiagnostic.PingTargetLossPct | Should -Be 100
         $diagnostics[0].ParsedDiagnostic.TargetIPv4 | Should -Be '192.0.2.10'
         $diagnostics[0].ParsedDiagnostic.WgetStderr | Should -Be 'wget: connection reset by peer'
+        $diagnostics[0].ParsedDiagnostic.TcpGatewayProbeResult | Should -Be 'success'
+        $diagnostics[0].ParsedDiagnostic.TcpTargetProbeResult | Should -Be 'exit_1'
+        $diagnostics[0].ParsedDiagnostic.IpRule | Should -Be '0: from all lookup local'
+        $diagnostics[0].ParsedDiagnostic.BatctlIf | Should -Be 'wlan0: active'
+        $diagnostics[0].ParsedDiagnostic.BatctlN | Should -Be 'wlan0 02:11:22:33:44:55 0.420s'
         $diagnostics[0].ParsedDiagnostic.UbusIfstatusWan | Should -Be '{"up":true}'
     }
 }
@@ -1432,5 +1566,12 @@ Describe 'Invoke-NodeCollectBatch' {
         @($sorted[1].CollectResult.Files).Count | Should -Be 1
     }
 }
+
+
+
+
+
+
+
 
 

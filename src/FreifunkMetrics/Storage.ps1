@@ -147,6 +147,8 @@ CREATE TABLE IF NOT EXISTS measurements (
     download_duration_seconds REAL,
     timeout_seconds INTEGER,
     wget_exit_code INTEGER,
+    wget_exit_reason TEXT,
+    wget_stderr TEXT,
     raw_output TEXT NOT NULL,
     collected_at_utc TEXT NOT NULL
 );
@@ -176,8 +178,17 @@ CREATE TABLE IF NOT EXISTS node_diagnostics (
     route_get_ipv4 TEXT,
     route_get_ipv6 TEXT,
     wget_stderr TEXT,
+    tcp_gateway_probe_port INTEGER,
+    tcp_gateway_probe_result TEXT,
+    tcp_target_probe_port INTEGER,
+    tcp_target_probe_result TEXT,
     target_resolution TEXT,
     route_get TEXT,
+    tcp_gateway_probe TEXT,
+    tcp_target_probe TEXT,
+    ip_rule TEXT,
+    batctl_if TEXT,
+    batctl_n TEXT,
     ubus_network_dump TEXT,
     ubus_ifstatus_wan TEXT,
     ubus_ifstatus_wan6 TEXT,
@@ -200,13 +211,24 @@ CREATE INDEX IF NOT EXISTS idx_node_diagnostics_run_device_id ON node_diagnostic
 "@
 
     Invoke-Sqlite -Config $Config -Sql $ddl | Out-Null
+    Ensure-SqliteColumn -Config $Config -TableName 'measurements' -ColumnName 'wget_exit_reason' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'measurements' -ColumnName 'wget_stderr' -Definition 'TEXT'
     Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'target_ipv4' -Definition 'TEXT'
     Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'target_ipv6' -Definition 'TEXT'
     Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'route_get_ipv4' -Definition 'TEXT'
     Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'route_get_ipv6' -Definition 'TEXT'
     Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'wget_stderr' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'tcp_gateway_probe_port' -Definition 'INTEGER'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'tcp_gateway_probe_result' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'tcp_target_probe_port' -Definition 'INTEGER'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'tcp_target_probe_result' -Definition 'TEXT'
     Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'target_resolution' -Definition 'TEXT'
     Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'route_get' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'tcp_gateway_probe' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'tcp_target_probe' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'ip_rule' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'batctl_if' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'batctl_n' -Definition 'TEXT'
     Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'ubus_network_dump' -Definition 'TEXT'
     Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'ubus_ifstatus_wan' -Definition 'TEXT'
     Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'ubus_ifstatus_wan6' -Definition 'TEXT'
@@ -327,6 +349,8 @@ function Save-Measurement {
     $downloadDurationSeconds = 'NULL'
     $timeoutSeconds = 'NULL'
     $wgetExitCode = 'NULL'
+    $wgetExitReason = ''
+    $wgetStderr = ''
 
     if ($ParsedMeasurement) {
         $nodeId = ConvertTo-SqlEscapedLiteral -Value $ParsedMeasurement.NodeId
@@ -351,11 +375,17 @@ function Save-Measurement {
         if ($null -ne $ParsedMeasurement.PSObject.Properties['WgetExitCode'] -and $null -ne $ParsedMeasurement.WgetExitCode) {
             $wgetExitCode = [string]$ParsedMeasurement.WgetExitCode
         }
+        if ($null -ne $ParsedMeasurement.PSObject.Properties['WgetExitReason'] -and $null -ne $ParsedMeasurement.WgetExitReason) {
+            $wgetExitReason = ConvertTo-SqlEscapedLiteral -Value $ParsedMeasurement.WgetExitReason
+        }
+        if ($null -ne $ParsedMeasurement.PSObject.Properties['WgetStderr'] -and $null -ne $ParsedMeasurement.WgetStderr) {
+            $wgetStderr = ConvertTo-SqlEscapedLiteral -Value $ParsedMeasurement.WgetStderr
+        }
     }
 
     $measuredAtEsc = ConvertTo-SqlEscapedLiteral -Value $measuredAtUtc
 
-    $insertMeasurement = "INSERT INTO measurements (run_id, device_id, name, ip, domain, nodeid, target, throughput_mbit, measurement_timestamp_ns, measured_at_utc, result_type, failure_reason, downloaded_bytes, expected_bytes, download_duration_seconds, timeout_seconds, wget_exit_code, raw_output, collected_at_utc) VALUES ('$((ConvertTo-SqlEscapedLiteral -Value $RunId))', '$deviceId', '$name', '$ip', '$domain', '$nodeId', '$target', $throughput, '$tsNs', '$measuredAtEsc', '$resultType', '$failureReason', $downloadedBytes, $expectedBytes, $downloadDurationSeconds, $timeoutSeconds, $wgetExitCode, '$rawEsc', '$nowUtc');"
+    $insertMeasurement = "INSERT INTO measurements (run_id, device_id, name, ip, domain, nodeid, target, throughput_mbit, measurement_timestamp_ns, measured_at_utc, result_type, failure_reason, downloaded_bytes, expected_bytes, download_duration_seconds, timeout_seconds, wget_exit_code, wget_exit_reason, wget_stderr, raw_output, collected_at_utc) VALUES ('$((ConvertTo-SqlEscapedLiteral -Value $RunId))', '$deviceId', '$name', '$ip', '$domain', '$nodeId', '$target', $throughput, '$tsNs', '$measuredAtEsc', '$resultType', '$failureReason', $downloadedBytes, $expectedBytes, $downloadDurationSeconds, $timeoutSeconds, $wgetExitCode, '$wgetExitReason', '$wgetStderr', '$rawEsc', '$nowUtc');"
 
     Invoke-Sqlite -Config $Config -Sql $insertMeasurement | Out-Null
     Write-Log -Message "DB insert complete for node ${ip}"
@@ -383,7 +413,8 @@ INSERT INTO node_diagnostics (
     speedtest_delay_seconds, diagnostic_delay_seconds, target_host, gateway_probe, gateway_probe_kind,
     ping_gateway_loss_pct, ping_target_loss_pct, load1, load5, load15,
     target_ipv4, target_ipv6, route_get_ipv4, route_get_ipv6, wget_stderr,
-    target_resolution, route_get, ubus_network_dump, ubus_ifstatus_wan, ubus_ifstatus_wan6,
+    tcp_gateway_probe_port, tcp_gateway_probe_result, tcp_target_probe_port, tcp_target_probe_result,
+    target_resolution, route_get, tcp_gateway_probe, tcp_target_probe, ip_rule, batctl_if, batctl_n, ubus_network_dump, ubus_ifstatus_wan, ubus_ifstatus_wan6,
     local_path, raw_output, collected_at_utc
 ) VALUES (
     '$((ConvertTo-SqlEscapedLiteral -Value $RunId))',
@@ -409,8 +440,17 @@ INSERT INTO node_diagnostics (
     '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.RouteGetIPv4))',
     '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.RouteGetIPv6))',
     '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.WgetStderr))',
+    $([int]$Diagnostic.TcpGatewayProbePort),
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.TcpGatewayProbeResult))',
+    $([int]$Diagnostic.TcpTargetProbePort),
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.TcpTargetProbeResult))',
     '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.TargetResolution))',
     '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.RouteGet))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.TcpGatewayProbe))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.TcpTargetProbe))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.IpRule))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.BatctlIf))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.BatctlN))',
     '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.UbusNetworkDump))',
     '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.UbusIfstatusWan))',
     '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.UbusIfstatusWan6))',
@@ -473,3 +513,7 @@ function Add-NodeJobRecord {
 
     Invoke-Sqlite -Config $Config -Sql $sql | Out-Null
 }
+
+
+
+

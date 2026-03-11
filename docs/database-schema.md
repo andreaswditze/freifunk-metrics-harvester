@@ -67,6 +67,8 @@ Final stored measurements with raw payload.
 - `download_duration_seconds` REAL
 - `timeout_seconds` INTEGER
 - `wget_exit_code` INTEGER
+- `wget_exit_reason` TEXT
+- `wget_stderr` TEXT
 - `raw_output` TEXT
 - `collected_at_utc` TEXT
 
@@ -97,8 +99,17 @@ Per-node early diagnostic snapshots captured near the scheduled download start f
 - `route_get_ipv4` TEXT
 - `route_get_ipv6` TEXT
 - `wget_stderr` TEXT
+- `tcp_gateway_probe_port` INTEGER
+- `tcp_gateway_probe_result` TEXT
+- `tcp_target_probe_port` INTEGER
+- `tcp_target_probe_result` TEXT
 - `target_resolution` TEXT
 - `route_get` TEXT
+- `tcp_gateway_probe` TEXT
+- `tcp_target_probe` TEXT
+- `ip_rule` TEXT
+- `batctl_if` TEXT
+- `batctl_n` TEXT
 - `ubus_network_dump` TEXT
 - `ubus_ifstatus_wan` TEXT
 - `ubus_ifstatus_wan6` TEXT
@@ -123,8 +134,16 @@ The schema also creates operational indexes for the main query paths:
 
 ## Notes
 - Raw files are also stored in `data/raw/<run_id>/`.
-- Final failed speedtest results are also stored in `measurements`; they use `throughput_mbit = 0` and preserve the raw failure payload plus parsed transfer metadata.
+- Final failed speedtest results are also stored in `measurements`; they use `throughput_mbit = 0` and preserve the raw failure payload plus parsed transfer metadata, including dedicated `wget_exit_reason` and untruncated `wget_stderr` fields.
 - Early diagnostics are written to `data/raw/<run_id>/` for all triggered nodes and persisted in `node_diagnostics` whenever the collector parses a diagnostic payload for that node.
+- BATMAN mesh quality snapshots are persisted via `batctl_if` and `batctl_n` to help judge whether a stable mesh path to an exit gateway exists.
+- Default gateway TCP reachability is additionally persisted via `tcp_gateway_probe_port`, `tcp_gateway_probe_result`, and `tcp_gateway_probe` so WAN-less nodes can be distinguished from pure ICMP reachability issues.
+- Target-host TCP reachability is additionally persisted via `tcp_target_probe_port`, `tcp_target_probe_result`, and `tcp_target_probe` to separate long `downloaded_bytes = 0` failures from DNS-only or ICMP-only symptoms.
 - Schema initialization runs automatically inside `collect-node-metrics.ps1`.
 - The collect phase waits for parseable result files using polling and a timeout based on `TriggerRandomDelayMaxSeconds + CollectWaitTimeoutSeconds`.
 - WAL mode is enabled for the database.
+
+
+
+
+

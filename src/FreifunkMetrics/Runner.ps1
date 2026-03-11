@@ -128,8 +128,17 @@ function Save-CollectedNodeDiagnostics {
                 RouteGetIPv4           = $diagnosticFile.ParsedDiagnostic.RouteGetIPv4
                 RouteGetIPv6           = $diagnosticFile.ParsedDiagnostic.RouteGetIPv6
                 WgetStderr             = $diagnosticFile.ParsedDiagnostic.WgetStderr
+                TcpGatewayProbePort    = $diagnosticFile.ParsedDiagnostic.TcpGatewayProbePort
+                TcpGatewayProbeResult  = $diagnosticFile.ParsedDiagnostic.TcpGatewayProbeResult
+                TcpTargetProbePort     = $diagnosticFile.ParsedDiagnostic.TcpTargetProbePort
+                TcpTargetProbeResult   = $diagnosticFile.ParsedDiagnostic.TcpTargetProbeResult
                 TargetResolution       = $diagnosticFile.ParsedDiagnostic.TargetResolution
                 RouteGet               = $diagnosticFile.ParsedDiagnostic.RouteGet
+                TcpGatewayProbe        = $diagnosticFile.ParsedDiagnostic.TcpGatewayProbe
+                TcpTargetProbe         = $diagnosticFile.ParsedDiagnostic.TcpTargetProbe
+                IpRule                 = $diagnosticFile.ParsedDiagnostic.IpRule
+                BatctlIf               = $diagnosticFile.ParsedDiagnostic.BatctlIf
+                BatctlN                = $diagnosticFile.ParsedDiagnostic.BatctlN
                 UbusNetworkDump        = $diagnosticFile.ParsedDiagnostic.UbusNetworkDump
                 UbusIfstatusWan        = $diagnosticFile.ParsedDiagnostic.UbusIfstatusWan
                 UbusIfstatusWan6       = $diagnosticFile.ParsedDiagnostic.UbusIfstatusWan6
@@ -401,3 +410,7 @@ function Invoke-CollectNodeMetricsMain {
         throw
     }
 }
+
+
+
+

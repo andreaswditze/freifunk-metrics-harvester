@@ -54,6 +54,7 @@ function Get-EnvironmentConfig {
         SpeedtestTargetBytes              = 104857600
         EnableNodeDiagnostics             = $true
         NodeDiagnosticsDelaySeconds       = 60
+        NodeDiagnosticsGatewayTcpProbePort = 53
         LogFilePrefix                     = 'collect-node-metrics'
         ExcelInputFiles                   = @()
         ExcelInputDirectories             = @()
@@ -216,6 +217,10 @@ function Assert-ValidConfig {
         $Config.NodeDiagnosticsDelaySeconds = 60
     }
 
+    if (-not $Config.ContainsKey('NodeDiagnosticsGatewayTcpProbePort')) {
+        $Config.NodeDiagnosticsGatewayTcpProbePort = 53
+    }
+
     $Config.EnableNodeDiagnostics = [bool]$Config.EnableNodeDiagnostics
 
     try {
@@ -229,10 +234,22 @@ function Assert-ValidConfig {
         throw 'Config value NodeDiagnosticsDelaySeconds must be zero or greater.'
     }
 
+    try {
+        $Config.NodeDiagnosticsGatewayTcpProbePort = [int]$Config.NodeDiagnosticsGatewayTcpProbePort
+    }
+    catch {
+        throw 'Config value NodeDiagnosticsGatewayTcpProbePort must be an integer.'
+    }
+
+    if ($Config.NodeDiagnosticsGatewayTcpProbePort -lt 0 -or $Config.NodeDiagnosticsGatewayTcpProbePort -gt 65535) {
+        throw 'Config value NodeDiagnosticsGatewayTcpProbePort must be between 0 and 65535.'
+    }
+
     $Config.ExcelInputFiles = @($Config.ExcelInputFiles | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
     $Config.ExcelInputDirectories = @($Config.ExcelInputDirectories | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
     $Config.ExcelSearchRecurse = [bool]$Config.ExcelSearchRecurse
     $Config.UseTestNodeIPs = [bool]$Config.UseTestNodeIPs
     $Config.TestNodeIPs = @($Config.TestNodeIPs | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
 }
+
 
