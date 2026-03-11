@@ -244,6 +244,90 @@ function Get-NodeTriggerAssignments {
     )
 }
 
+
+function Get-NodeDiagnosticsSettings {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config
+    )
+
+    $enabled = if ($Config.ContainsKey('EnableNodeDiagnostics')) { [bool]$Config.EnableNodeDiagnostics } else { $true }
+    $delaySeconds = if ($Config.ContainsKey('NodeDiagnosticsDelaySeconds')) { [Math]::Max(0, [int]$Config.NodeDiagnosticsDelaySeconds) } else { 60 }
+    $keepThresholdMbit = if ($Config.ContainsKey('NodeDiagnosticsKeepThresholdMbit')) {
+        [double]::Parse([string]$Config.NodeDiagnosticsKeepThresholdMbit, [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    else {
+        10.0
+    }
+
+    return [pscustomobject]@{
+        Enabled           = $enabled
+        DelaySeconds      = $delaySeconds
+        KeepThresholdMbit = $keepThresholdMbit
+    }
+}
+
+function Get-NodeDiagnosticsTargetHost {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config
+    )
+
+    $uri = $null
+    if (-not [uri]::TryCreate((Convert-ToTrimmedString -Value $Config.SpeedtestTargetUrl), [System.UriKind]::Absolute, [ref]$uri)) {
+        return ''
+    }
+
+    return $uri.Host
+}
+
+function Test-ShouldKeepNodeDiagnostics {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyCollection()]
+        [object[]]$MeasurementFiles = @(),
+        [Parameter(Mandatory = $true)]
+        [double]$KeepThresholdMbit
+    )
+
+    if (@($MeasurementFiles).Count -eq 0) {
+        return $true
+    }
+
+    foreach ($file in @($MeasurementFiles)) {
+        if ($null -eq $file.ParsedMeasurement) {
+            continue
+        }
+
+        if ($file.ParsedMeasurement.ResultType -eq 'final_failed') {
+            return $true
+        }
+
+        if ($file.ParsedMeasurement.ResultType -eq 'success' -and [double]$file.ParsedMeasurement.ThroughputMbit -le $KeepThresholdMbit) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Remove-NodeDiagnosticArtifacts {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyCollection()]
+        [object[]]$DiagnosticFiles = @()
+    )
+
+    foreach ($file in @($DiagnosticFiles)) {
+        $localPath = Convert-ToTrimmedString -Value $file.LocalPath
+        if (-not [string]::IsNullOrWhiteSpace($localPath) -and (Test-Path -Path $localPath -PathType Leaf)) {
+            Remove-Item -Path $localPath -Force
+        }
+    }
+}
+
 function Get-NodeTriggerCommandInfo {
     [CmdletBinding()]
     param(
@@ -262,6 +346,9 @@ function Get-NodeTriggerCommandInfo {
     $targetUrl = Convert-ToTrimmedString -Value $Config.SpeedtestTargetUrl
     $targetUrlShell = Convert-ToShellSingleQuoted -Value $targetUrl
     $targetBytes = [Math]::Max(1, [int64]$Config.SpeedtestTargetBytes)
+    $diagnostics = Get-NodeDiagnosticsSettings -Config $Config
+    $diagnosticDelaySeconds = $delaySeconds + $diagnostics.DelaySeconds
+    $targetHost = Convert-ToShellSingleQuoted -Value (Get-NodeDiagnosticsTargetHost -Config $Config)
 
     $payload = @"
 nodeid=`$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac)
@@ -298,18 +385,108 @@ awk -v nodeid="`$nodeid" -v start="`$start" -v t0="`$t0" -v t1="`$t1" -v target=
     printf "speedtest,nodeid=%s download_mbit=%.2f,target=\"%s\" %s\n",nodeid,(bytes*8)/(sec*1000000),target,start
 }'
 "@
+
+    $diagnosticPayload = @"
+nodeid=`$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac)
+target_host='$targetHost'
+speedtest_delay_seconds=$delaySeconds
+diagnostic_delay_seconds=$diagnosticDelaySeconds
+sleep "`$diagnostic_delay_seconds"
+ts=`$(date +%s%N)
+gateway4=`$(ip route 2>/dev/null | awk '/^default / { print `$3; exit }')
+gateway6=`$(ip -6 route 2>/dev/null | awk '/^default / { print `$3; exit }')
+gateway_probe="`$gateway4"
+gateway_probe_kind='ipv4'
+if [ -z "`$gateway_probe" ] && [ -n "`$gateway6" ]; then
+    gateway_probe="`$gateway6"
+    gateway_probe_kind='ipv6'
+fi
+ping_gateway_loss='-1'
+if [ -n "`$gateway_probe" ]; then
+    if [ "`$gateway_probe_kind" = 'ipv6' ]; then
+        ping_gateway_output=`$(ping6 -q -c 4 -w 8 "`$gateway_probe" 2>&1 || true)
+    else
+        ping_gateway_output=`$(ping -q -c 4 -w 8 "`$gateway_probe" 2>&1 || true)
+    fi
+    ping_gateway_loss=`$(printf '%s\n' "`$ping_gateway_output" | awk -F', ' '/packet loss/ { gsub(/% packet loss/, "", `$3); print `$3; found=1; exit } END { if (!found) print "-1" }')
+fi
+ping_target_loss='-1'
+if [ -n "`$target_host" ]; then
+    ping_target_output=`$(ping -q -c 4 -w 8 "`$target_host" 2>&1 || true)
+    ping_target_loss=`$(printf '%s\n' "`$ping_target_output" | awk -F', ' '/packet loss/ { gsub(/% packet loss/, "", `$3); print `$3; found=1; exit } END { if (!found) print "-1" }')
+fi
+load1='0'
+load5='0'
+load15='0'
+if [ -r /proc/loadavg ]; then
+    read load1 load5 load15 _ </proc/loadavg
+fi
+printf 'diagnostic,nodeid=%s target_host="%s" speedtest_delay_seconds=%s diagnostic_delay_seconds=%s timestamp=%s\n' "`$nodeid" "`$target_host" "`$speedtest_delay_seconds" "`$diagnostic_delay_seconds" "`$ts"
+printf 'diag_summary,load1=%s load5=%s load15=%s gateway_probe="%s" gateway_probe_kind="%s" ping_gateway_loss=%s ping_target_loss=%s\n' "`$load1" "`$load5" "`$load15" "`$gateway_probe" "`$gateway_probe_kind" "`$ping_gateway_loss" "`$ping_target_loss"
+echo 'diag_section,name=ip_route'
+ip route 2>&1 || true
+echo 'diag_section_end,name=ip_route'
+echo 'diag_section,name=ip6_route'
+ip -6 route 2>&1 || true
+echo 'diag_section_end,name=ip6_route'
+echo 'diag_section,name=ip_addr'
+ip addr 2>&1 || true
+echo 'diag_section_end,name=ip_addr'
+echo 'diag_section,name=ip_link_stats'
+ip -s link 2>&1 || true
+echo 'diag_section_end,name=ip_link_stats'
+echo 'diag_section,name=loadavg'
+cat /proc/loadavg 2>&1 || true
+echo 'diag_section_end,name=loadavg'
+echo 'diag_section,name=meminfo_head'
+sed -n '1,5p' /proc/meminfo 2>&1 || true
+echo 'diag_section_end,name=meminfo_head'
+if command -v batctl >/dev/null 2>&1; then
+    echo 'diag_section,name=batctl_if'
+    batctl if 2>&1 || true
+    echo 'diag_section_end,name=batctl_if'
+    echo 'diag_section,name=batctl_n'
+    batctl n 2>&1 || true
+    echo 'diag_section_end,name=batctl_n'
+fi
+if command -v logread >/dev/null 2>&1; then
+    echo 'diag_section,name=logread_tail'
+    logread 2>&1 | tail -n 40 || true
+    echo 'diag_section_end,name=logread_tail'
+fi
+"@
+
     $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $remoteRunDir
-    $triggerCmd = "mkdir -p '$remoteDirEscaped'; ts=`$(date +%s%N); out='$remoteDirEscaped/'`$ts.txt; ( $payload ) > `"`$out`" 2>&1 &"
+    $triggerSegments = @(
+        "mkdir -p '$remoteDirEscaped'",
+        "ts=`$(date +%s%N)",
+        "out='$remoteDirEscaped/'`$ts.txt",
+        "( $payload ) > `"`$out`" 2>&1 &"
+    )
+
+    if ($diagnostics.Enabled) {
+        $triggerSegments += @(
+            "diag_ts=`$(date +%s%N)",
+            "diag_out='$remoteDirEscaped/diag-'`$diag_ts.txt",
+            "( $diagnosticPayload ) > `"`$diag_out`" 2>&1 &"
+        )
+    }
+
+    $triggerCmd = $triggerSegments -join '; '
 
     return [pscustomobject]@{
-        RemoteResultFile     = $remoteResultPattern
-        RemoteErrorFile      = ''
-        TriggerCommand       = $triggerCmd
-        AssignedDelaySeconds = $delaySeconds
+        RemoteResultFile              = $remoteResultPattern
+        RemoteErrorFile               = ''
+        TriggerCommand                = $triggerCmd
+        AssignedDelaySeconds          = $delaySeconds
+        DiagnosticDelaySeconds        = $diagnosticDelaySeconds
+        DiagnosticsEnabled            = $diagnostics.Enabled
+        DiagnosticsKeepThresholdMbit  = $diagnostics.KeepThresholdMbit
     }
 }
 
 function Invoke-NodeTriggerCommand {
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -536,6 +713,7 @@ find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while
             RawOutput       = ''
             ErrorOutput     = ($streamOutput -join ' ')
             Files           = @()
+            DiagnosticFiles = @()
             PendingFiles    = @()
         }
     }
@@ -551,12 +729,15 @@ find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while
             RawOutput       = ''
             ErrorOutput     = ''
             Files           = @()
+            DiagnosticFiles = @()
             PendingFiles    = @()
         }
     }
 
     $safeIp = Get-SafeFileNamePart -Value $Node.IP
-    $downloaded = @()
+    $downloadedMeasurements = @()
+    $downloadedDiagnostics = @()
+    $downloadedArtifacts = @()
     $pendingFiles = @()
     $downloadErrors = @()
 
@@ -574,35 +755,50 @@ find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while
         Set-Content -Path $localPath -Value $trimmedRawOutput
 
         $parsedMeasurement = ConvertFrom-MeasurementOutput -RawOutput $trimmedRawOutput
-        if ($null -eq $parsedMeasurement) {
-            $pendingFiles += [pscustomobject]@{
-                RemotePath = $remotePath
-                LocalPath  = $localPath
-                RawOutput  = $trimmedRawOutput
-                RawSize    = $trimmedRawOutput.Length
+        if ($null -ne $parsedMeasurement) {
+            $measurementFile = [pscustomobject]@{
+                RemotePath        = $remotePath
+                LocalPath         = $localPath
+                RawOutput         = $trimmedRawOutput
+                ParsedMeasurement = $parsedMeasurement
             }
+            $downloadedMeasurements += $measurementFile
+            $downloadedArtifacts += $measurementFile
             continue
         }
 
-        $downloaded += [pscustomobject]@{
-            RemotePath        = $remotePath
-            LocalPath         = $localPath
-            RawOutput         = $trimmedRawOutput
-            ParsedMeasurement = $parsedMeasurement
+        $parsedDiagnostic = ConvertFrom-NodeDiagnosticOutput -RawOutput $trimmedRawOutput
+        if ($null -ne $parsedDiagnostic) {
+            $diagnosticFile = [pscustomobject]@{
+                RemotePath       = $remotePath
+                LocalPath        = $localPath
+                RawOutput        = $trimmedRawOutput
+                ParsedDiagnostic = $parsedDiagnostic
+            }
+            $downloadedDiagnostics += $diagnosticFile
+            $downloadedArtifacts += $diagnosticFile
+            continue
+        }
+
+        $pendingFiles += [pscustomobject]@{
+            RemotePath = $remotePath
+            LocalPath  = $localPath
+            RawOutput  = $trimmedRawOutput
+            RawSize    = $trimmedRawOutput.Length
         }
     }
 
-    if ($downloaded.Count -gt 0) {
-        $deleteTargets = @($downloaded | ForEach-Object { "'$(Convert-ToShellSingleQuoted -Value $_.RemotePath)'" })
+    if ($downloadedArtifacts.Count -gt 0) {
+        $deleteTargets = @($downloadedArtifacts | ForEach-Object { "'$(Convert-ToShellSingleQuoted -Value $_.RemotePath)'" })
         $deleteCmd = 'rm -f ' + ($deleteTargets -join ' ')
         $deleteOutput = & $Config.SshBinary @sshArgs $deleteCmd 2>&1
         $deleteExit = $LASTEXITCODE
         if ($deleteExit -ne 0) {
-            $downloadErrors += ('delete failed for ' + (@($downloaded | ForEach-Object { $_.RemotePath }) -join ', ') + ': ' + ($deleteOutput -join ' '))
+            $downloadErrors += ('delete failed for ' + (@($downloadedArtifacts | ForEach-Object { $_.RemotePath }) -join ', ') + ': ' + ($deleteOutput -join ' '))
         }
     }
 
-    if ($downloaded.Count -gt 0 -and $pendingFiles.Count -eq 0) {
+    if ($downloadedArtifacts.Count -gt 0 -and $pendingFiles.Count -eq 0) {
         $cleanupCmd = "rmdir '$remoteDirEscaped' >/dev/null 2>&1 || true"
         $cleanupOutput = & $Config.SshBinary @sshArgs $cleanupCmd 2>&1
         if ($LASTEXITCODE -ne 0) {
@@ -610,7 +806,7 @@ find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while
         }
     }
 
-    if ($downloaded.Count -eq 0) {
+    if ($downloadedMeasurements.Count -eq 0) {
         return [pscustomobject]@{
             Success         = $true
             LocalResultPath = ''
@@ -618,11 +814,12 @@ find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while
             RawOutput       = ''
             ErrorOutput     = (@($downloadErrors) -join ' | ')
             Files           = @()
+            DiagnosticFiles = @($downloadedDiagnostics)
             PendingFiles    = @($pendingFiles)
         }
     }
 
-    $firstFile = $downloaded[0]
+    $firstFile = $downloadedMeasurements[0]
 
     return [pscustomobject]@{
         Success         = $true
@@ -630,12 +827,14 @@ find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while
         LocalErrorPath  = ''
         RawOutput       = $firstFile.RawOutput
         ErrorOutput     = (@($downloadErrors) -join ' | ')
-        Files           = @($downloaded)
+        Files           = @($downloadedMeasurements)
+        DiagnosticFiles = @($downloadedDiagnostics)
         PendingFiles    = @($pendingFiles)
     }
 }
 
 function Invoke-NodeCollectBatch {
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -698,6 +897,7 @@ function Invoke-NodeCollectBatch {
                     RawOutput       = ''
                     ErrorOutput     = $_.Exception.Message
                     Files           = @()
+                    DiagnosticFiles = @()
                     PendingFiles    = @()
                 }
             }
@@ -758,4 +958,64 @@ function ConvertFrom-MeasurementOutput {
     }
 
     return $null
+}
+
+function ConvertFrom-NodeDiagnosticOutput {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$RawOutput
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RawOutput)) {
+        return $null
+    }
+
+    $headerRegex = '^diagnostic,nodeid=(?<nodeid>[^ ]+) target_host="(?<target>[^"]*)" speedtest_delay_seconds=(?<speedtest_delay>-?[0-9]+) diagnostic_delay_seconds=(?<diag_delay>-?[0-9]+) timestamp=(?<timestamp>[0-9]+)$'
+    $summaryRegex = '^diag_summary,load1=(?<load1>-?[0-9]+(?:\.[0-9]+)?) load5=(?<load5>-?[0-9]+(?:\.[0-9]+)?) load15=(?<load15>-?[0-9]+(?:\.[0-9]+)?) gateway_probe="(?<gateway>[^"]*)" gateway_probe_kind="(?<gateway_kind>[^"]*)" ping_gateway_loss=(?<gateway_loss>-?[0-9]+(?:\.[0-9]+)?) ping_target_loss=(?<target_loss>-?[0-9]+(?:\.[0-9]+)?)$'
+
+    $lines = @(
+        $RawOutput -split '\r?\n' |
+            ForEach-Object { Convert-ToTrimmedString -Value $_ } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+
+    $headerMatch = $null
+    $summaryMatch = $null
+    foreach ($line in $lines) {
+        if ($null -eq $headerMatch) {
+            $candidate = [regex]::Match($line, $headerRegex)
+            if ($candidate.Success) {
+                $headerMatch = $candidate
+                continue
+            }
+        }
+
+        if ($null -eq $summaryMatch) {
+            $candidate = [regex]::Match($line, $summaryRegex)
+            if ($candidate.Success) {
+                $summaryMatch = $candidate
+            }
+        }
+    }
+
+    if ($null -eq $headerMatch -or $null -eq $summaryMatch) {
+        return $null
+    }
+
+    return [pscustomobject]@{
+        NodeId                 = $headerMatch.Groups['nodeid'].Value
+        TargetHost             = $headerMatch.Groups['target'].Value
+        SpeedtestDelaySeconds  = [int]$headerMatch.Groups['speedtest_delay'].Value
+        DiagnosticDelaySeconds = [int]$headerMatch.Groups['diag_delay'].Value
+        TimestampNs            = $headerMatch.Groups['timestamp'].Value
+        GatewayProbe           = $summaryMatch.Groups['gateway'].Value
+        GatewayProbeKind       = $summaryMatch.Groups['gateway_kind'].Value
+        PingGatewayLossPct     = [double]::Parse($summaryMatch.Groups['gateway_loss'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
+        PingTargetLossPct      = [double]::Parse($summaryMatch.Groups['target_loss'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
+        Load1                  = [double]::Parse($summaryMatch.Groups['load1'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
+        Load5                  = [double]::Parse($summaryMatch.Groups['load5'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
+        Load15                 = [double]::Parse($summaryMatch.Groups['load15'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
+    }
 }

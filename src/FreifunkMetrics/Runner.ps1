@@ -239,18 +239,43 @@ function Invoke-CollectNodeMetricsMain {
                     continue
                 }
 
-                $collectedFiles = @($collect.Files)
-                $pendingFiles = @($collect.PendingFiles)
+                $collectedFiles = if ($null -ne $collect.PSObject.Properties['Files']) { @($collect.Files) } else { @() }
+                $diagnosticFiles = if ($null -ne $collect.PSObject.Properties['DiagnosticFiles']) { @($collect.DiagnosticFiles) } else { @() }
+                $pendingFiles = if ($null -ne $collect.PSObject.Properties['PendingFiles']) { @($collect.PendingFiles) } else { @() }
+                $diagnosticsKeepThreshold = if ($config.ContainsKey('NodeDiagnosticsKeepThresholdMbit')) { [double]$config.NodeDiagnosticsKeepThresholdMbit } else { 10.0 }
 
-                if ($pendingFiles.Count -gt 0) {
-                    $pendingSummary = 'pending_files=' + $pendingFiles.Count + '; first_file=' + $pendingFiles[0].LocalPath + '; raw_size=' + $pendingFiles[0].RawSize
+                if (@($pendingFiles).Count -gt 0) {
+                    $pendingSummary = 'pending_files=' + @($pendingFiles).Count + '; first_file=' + $pendingFiles[0].LocalPath + '; raw_size=' + $pendingFiles[0].RawSize
                     Add-NodeFailureRecord -Failures $failedNodes -Node $node -Stage 'collect' -Detail $pendingSummary
                     Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status 'collect_pending' -CollectedAtUtc $collectedAtUtc -ResultFile ((@($pendingFiles | ForEach-Object { $_.LocalPath }) -join ';' ) ) -ErrorMessage $pendingSummary
                     Write-NodeActionLog -Node $node -Action 'collect_pending' -Detail $pendingSummary -Level WARN
                 }
 
-                if ($collectedFiles.Count -eq 0) {
-                    if ($pendingFiles.Count -gt 0) {
+                if (@($collectedFiles).Count -eq 0) {
+                    if (@($diagnosticFiles).Count -gt 0) {
+                        foreach ($diagnosticFile in $diagnosticFiles) {
+                            $diagnosticRecord = [pscustomobject]@{
+                                NodeId                 = $diagnosticFile.ParsedDiagnostic.NodeId
+                                TargetHost             = $diagnosticFile.ParsedDiagnostic.TargetHost
+                                SpeedtestDelaySeconds  = $diagnosticFile.ParsedDiagnostic.SpeedtestDelaySeconds
+                                DiagnosticDelaySeconds = $diagnosticFile.ParsedDiagnostic.DiagnosticDelaySeconds
+                                TimestampNs            = $diagnosticFile.ParsedDiagnostic.TimestampNs
+                                GatewayProbe           = $diagnosticFile.ParsedDiagnostic.GatewayProbe
+                                GatewayProbeKind       = $diagnosticFile.ParsedDiagnostic.GatewayProbeKind
+                                PingGatewayLossPct     = $diagnosticFile.ParsedDiagnostic.PingGatewayLossPct
+                                PingTargetLossPct      = $diagnosticFile.ParsedDiagnostic.PingTargetLossPct
+                                Load1                  = $diagnosticFile.ParsedDiagnostic.Load1
+                                Load5                  = $diagnosticFile.ParsedDiagnostic.Load5
+                                Load15                 = $diagnosticFile.ParsedDiagnostic.Load15
+                                LocalPath              = $diagnosticFile.LocalPath
+                                RawOutput              = $diagnosticFile.RawOutput
+                            }
+                            Save-NodeDiagnostic -Config $config -Node $node -RunId $RunId -Diagnostic $diagnosticRecord
+                        }
+                        Write-NodeActionLog -Node $node -Action 'diagnostic_kept' -Detail ('reason=no_measurement; files=' + @($diagnosticFiles).Count + '; first_file=' + $diagnosticFiles[0].LocalPath) -Level WARN
+                    }
+
+                    if (@($pendingFiles).Count -gt 0) {
                         $failedDeliveryNodeCount++
                         continue
                     }
@@ -264,24 +289,24 @@ function Invoke-CollectNodeMetricsMain {
                 }
 
                 $collectedCount++
-                $collectedFileCount += $collectedFiles.Count
+                $collectedFileCount += @($collectedFiles).Count
 
                 $successfulFiles = @($collectedFiles | Where-Object { $_.ParsedMeasurement.ResultType -eq 'success' })
                 $failedFiles = @($collectedFiles | Where-Object { $_.ParsedMeasurement.ResultType -eq 'final_failed' })
-                $nodeStatus = if ($successfulFiles.Count -gt 0 -and $failedFiles.Count -gt 0) { 'collected_mixed' } elseif ($successfulFiles.Count -gt 0) { 'collected' } else { 'collected_failed_result' }
+                $nodeStatus = if (@($successfulFiles).Count -gt 0 -and @($failedFiles).Count -gt 0) { 'collected_mixed' } elseif (@($successfulFiles).Count -gt 0) { 'collected' } else { 'collected_failed_result' }
 
-                if ($successfulFiles.Count -gt 0) {
+                if (@($successfulFiles).Count -gt 0) {
                     $successfulDeliveryNodeCount++
                 }
                 else {
                     $failedDeliveryNodeCount++
-                    $failureReason = if ($failedFiles.Count -gt 0) { @($failedFiles | ForEach-Object { $_.ParsedMeasurement.FailureReason } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)[0] } else { '' }
+                    $failureReason = if (@($failedFiles).Count -gt 0) { @($failedFiles | ForEach-Object { $_.ParsedMeasurement.FailureReason } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)[0] } else { '' }
                     Add-NodeFailureRecord -Failures $failedNodes -Node $node -Stage 'final' -Detail $failureReason
                 }
 
                 $resultFiles = (@($collectedFiles | ForEach-Object { $_.LocalPath }) -join ';' )
                 Add-NodeJobRecord -Config $config -RunId $RunId -Node $node -Status $nodeStatus -CollectedAtUtc $collectedAtUtc -ResultFile $resultFiles -ErrorFile '' -ErrorMessage $collect.ErrorOutput
-                Write-NodeActionLog -Node $node -Action 'collect_success' -Detail ('files=' + $collectedFiles.Count + '; success=' + $successfulFiles.Count + '; final_failed=' + $failedFiles.Count + '; first_file=' + $collectedFiles[0].LocalPath)
+                Write-NodeActionLog -Node $node -Action 'collect_success' -Detail ('files=' + @($collectedFiles).Count + '; success=' + @($successfulFiles).Count + '; final_failed=' + @($failedFiles).Count + '; first_file=' + $collectedFiles[0].LocalPath)
 
                 foreach ($file in $collectedFiles) {
                     $parsed = $file.ParsedMeasurement
@@ -298,6 +323,38 @@ function Invoke-CollectNodeMetricsMain {
                     }
 
                     Save-Measurement -Config $config -Node $node -RunId $RunId -RawOutput $file.RawOutput -ParsedMeasurement $parsed
+                }
+
+                if (@($diagnosticFiles).Count -gt 0) {
+                    $keepDiagnostics = Test-ShouldKeepNodeDiagnostics -MeasurementFiles $collectedFiles -KeepThresholdMbit $diagnosticsKeepThreshold
+                    if ($keepDiagnostics) {
+                        foreach ($diagnosticFile in $diagnosticFiles) {
+                            $diagnosticRecord = [pscustomobject]@{
+                                NodeId                 = $diagnosticFile.ParsedDiagnostic.NodeId
+                                TargetHost             = $diagnosticFile.ParsedDiagnostic.TargetHost
+                                SpeedtestDelaySeconds  = $diagnosticFile.ParsedDiagnostic.SpeedtestDelaySeconds
+                                DiagnosticDelaySeconds = $diagnosticFile.ParsedDiagnostic.DiagnosticDelaySeconds
+                                TimestampNs            = $diagnosticFile.ParsedDiagnostic.TimestampNs
+                                GatewayProbe           = $diagnosticFile.ParsedDiagnostic.GatewayProbe
+                                GatewayProbeKind       = $diagnosticFile.ParsedDiagnostic.GatewayProbeKind
+                                PingGatewayLossPct     = $diagnosticFile.ParsedDiagnostic.PingGatewayLossPct
+                                PingTargetLossPct      = $diagnosticFile.ParsedDiagnostic.PingTargetLossPct
+                                Load1                  = $diagnosticFile.ParsedDiagnostic.Load1
+                                Load5                  = $diagnosticFile.ParsedDiagnostic.Load5
+                                Load15                 = $diagnosticFile.ParsedDiagnostic.Load15
+                                LocalPath              = $diagnosticFile.LocalPath
+                                RawOutput              = $diagnosticFile.RawOutput
+                            }
+                            Save-NodeDiagnostic -Config $config -Node $node -RunId $RunId -Diagnostic $diagnosticRecord
+                        }
+
+                        $keepReason = if (@($failedFiles).Count -gt 0) { 'final_failed' } else { 'throughput_le_threshold' }
+                        Write-NodeActionLog -Node $node -Action 'diagnostic_kept' -Detail ('reason=' + $keepReason + '; threshold_mbit=' + $diagnosticsKeepThreshold + '; files=' + @($diagnosticFiles).Count + '; first_file=' + $diagnosticFiles[0].LocalPath) -Level WARN
+                    }
+                    else {
+                        Remove-NodeDiagnosticArtifacts -DiagnosticFiles $diagnosticFiles
+                        Write-NodeActionLog -Node $node -Action 'diagnostic_discarded' -Detail ('reason=throughput_gt_threshold; threshold_mbit=' + $diagnosticsKeepThreshold + '; files=' + @($diagnosticFiles).Count)
+                    }
                 }
             }
             catch {

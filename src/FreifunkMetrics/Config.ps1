@@ -17,6 +17,7 @@ function Get-EnvironmentConfig {
 
     $configCandidates += @(
         (Join-Path $scriptRoot 'config.production.ps1'),
+        (Join-Path $scriptRoot 'config.development.ps1'),
         (Join-Path $scriptRoot 'config.development.example.ps1'),
         (Join-Path $scriptRoot 'config.demo.ps1')
     )
@@ -39,22 +40,25 @@ function Get-EnvironmentConfig {
     }
 
     $defaults = @{
-        SshUser                   = 'root'
-        SshBinary                 = 'ssh'
-        SQLiteBinary              = 'sqlite3'
-        RemoteResultDir           = '/tmp/harvester'
-        SshConnectTimeoutSeconds  = 8
-        TriggerParallelism        = 10
-        CollectParallelism        = 10
-        TriggerRandomDelayMaxSeconds = 600
-        SpeedtestTargetUrl        = 'https://fsn1-speed.hetzner.com/100MB.bin'
-        SpeedtestTargetBytes      = 104857600
-        LogFilePrefix             = 'collect-node-metrics'
-        ExcelInputFiles           = @()
-        ExcelInputDirectories     = @()
-        ExcelSearchRecurse        = $true
-        UseTestNodeIPs            = $false
-        TestNodeIPs               = @('2a03:2260:3013:200:7a8a:20ff:fed0:747a','2a03:2260:3013:200:1ae8:29ff:fe5c:1ff8')
+        SshUser                           = 'root'
+        SshBinary                         = 'ssh'
+        SQLiteBinary                      = 'sqlite3'
+        RemoteResultDir                   = '/tmp/harvester'
+        SshConnectTimeoutSeconds          = 8
+        TriggerParallelism                = 10
+        CollectParallelism                = 10
+        TriggerRandomDelayMaxSeconds      = 600
+        SpeedtestTargetUrl                = 'https://fsn1-speed.hetzner.com/100MB.bin'
+        SpeedtestTargetBytes              = 104857600
+        EnableNodeDiagnostics             = $true
+        NodeDiagnosticsDelaySeconds       = 60
+        NodeDiagnosticsKeepThresholdMbit  = 10.0
+        LogFilePrefix                     = 'collect-node-metrics'
+        ExcelInputFiles                   = @()
+        ExcelInputDirectories             = @()
+        ExcelSearchRecurse                = $true
+        UseTestNodeIPs                    = $false
+        TestNodeIPs                       = @('2a03:2260:3013:200:7a8a:20ff:fed0:747a','2a03:2260:3013:200:1ae8:29ff:fe5c:1ff8')
     }
 
     foreach ($key in $defaults.Keys) {
@@ -179,6 +183,45 @@ function Assert-ValidConfig {
 
     if ($Config.SpeedtestTargetBytes -lt 1) {
         throw 'Config value SpeedtestTargetBytes must be at least 1.'
+    }
+
+    if (-not $Config.ContainsKey('EnableNodeDiagnostics')) {
+        $Config.EnableNodeDiagnostics = $true
+    }
+
+    if (-not $Config.ContainsKey('NodeDiagnosticsDelaySeconds')) {
+        $Config.NodeDiagnosticsDelaySeconds = 60
+    }
+
+    if (-not $Config.ContainsKey('NodeDiagnosticsKeepThresholdMbit')) {
+        $Config.NodeDiagnosticsKeepThresholdMbit = 10.0
+    }
+
+    $Config.EnableNodeDiagnostics = [bool]$Config.EnableNodeDiagnostics
+
+    try {
+        $Config.NodeDiagnosticsDelaySeconds = [int]$Config.NodeDiagnosticsDelaySeconds
+    }
+    catch {
+        throw 'Config value NodeDiagnosticsDelaySeconds must be an integer.'
+    }
+
+    if ($Config.NodeDiagnosticsDelaySeconds -lt 0) {
+        throw 'Config value NodeDiagnosticsDelaySeconds must be zero or greater.'
+    }
+
+    try {
+        $Config.NodeDiagnosticsKeepThresholdMbit = [double]::Parse(
+            [string]$Config.NodeDiagnosticsKeepThresholdMbit,
+            [System.Globalization.CultureInfo]::InvariantCulture
+        )
+    }
+    catch {
+        throw 'Config value NodeDiagnosticsKeepThresholdMbit must be numeric.'
+    }
+
+    if ($Config.NodeDiagnosticsKeepThresholdMbit -lt 0) {
+        throw 'Config value NodeDiagnosticsKeepThresholdMbit must be zero or greater.'
     }
 
     $Config.ExcelInputFiles = @($Config.ExcelInputFiles | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })

@@ -103,6 +103,31 @@ CREATE TABLE IF NOT EXISTS measurements (
     collected_at_utc TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS node_diagnostics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    device_id TEXT,
+    name TEXT,
+    ip TEXT,
+    domain TEXT,
+    nodeid TEXT,
+    diagnostic_timestamp_ns TEXT,
+    diagnosed_at_utc TEXT,
+    speedtest_delay_seconds INTEGER,
+    diagnostic_delay_seconds INTEGER,
+    target_host TEXT,
+    gateway_probe TEXT,
+    gateway_probe_kind TEXT,
+    ping_gateway_loss_pct REAL,
+    ping_target_loss_pct REAL,
+    load1 REAL,
+    load5 REAL,
+    load15 REAL,
+    local_path TEXT,
+    raw_output TEXT NOT NULL,
+    collected_at_utc TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_nodes_last_seen_utc ON nodes(last_seen_utc);
 CREATE INDEX IF NOT EXISTS idx_node_jobs_run_id ON node_jobs(run_id);
 CREATE INDEX IF NOT EXISTS idx_node_jobs_run_status ON node_jobs(run_id, status);
@@ -111,6 +136,9 @@ CREATE INDEX IF NOT EXISTS idx_measurements_device_id ON measurements(device_id)
 CREATE INDEX IF NOT EXISTS idx_measurements_nodeid ON measurements(nodeid);
 CREATE INDEX IF NOT EXISTS idx_measurements_run_device_id ON measurements(run_id, device_id);
 CREATE INDEX IF NOT EXISTS idx_measurements_measured_at_utc ON measurements(measured_at_utc);
+CREATE INDEX IF NOT EXISTS idx_node_diagnostics_run_id ON node_diagnostics(run_id);
+CREATE INDEX IF NOT EXISTS idx_node_diagnostics_device_id ON node_diagnostics(device_id);
+CREATE INDEX IF NOT EXISTS idx_node_diagnostics_run_device_id ON node_diagnostics(run_id, device_id);
 "@
 
     Invoke-Sqlite -Config $Config -Sql $ddl | Out-Null
@@ -241,6 +269,56 @@ function Save-Measurement {
     Write-Log -Message "DB insert complete for node ${ip}"
 }
 
+function Save-NodeDiagnostic {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Node,
+        [Parameter(Mandatory = $true)]
+        [string]$RunId,
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Diagnostic
+    )
+
+    $nowUtc = (Get-Date).ToUniversalTime().ToString('o')
+    $diagnosedAtUtc = Convert-NodeTimestampToUtc -Timestamp $Diagnostic.TimestampNs
+
+    $insertSql = @"
+INSERT INTO node_diagnostics (
+    run_id, device_id, name, ip, domain, nodeid, diagnostic_timestamp_ns, diagnosed_at_utc,
+    speedtest_delay_seconds, diagnostic_delay_seconds, target_host, gateway_probe, gateway_probe_kind,
+    ping_gateway_loss_pct, ping_target_loss_pct, load1, load5, load15, local_path, raw_output, collected_at_utc
+) VALUES (
+    '$((ConvertTo-SqlEscapedLiteral -Value $RunId))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Node.DeviceID))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Node.Name))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Node.IP))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Node.Domain))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.NodeId))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.TimestampNs))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $diagnosedAtUtc))',
+    $([int]$Diagnostic.SpeedtestDelaySeconds),
+    $([int]$Diagnostic.DiagnosticDelaySeconds),
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.TargetHost))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.GatewayProbe))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.GatewayProbeKind))',
+    $([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.###}', [double]$Diagnostic.PingGatewayLossPct)),
+    $([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.###}', [double]$Diagnostic.PingTargetLossPct)),
+    $([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.###}', [double]$Diagnostic.Load1)),
+    $([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.###}', [double]$Diagnostic.Load5)),
+    $([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.###}', [double]$Diagnostic.Load15)),
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.LocalPath))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.RawOutput))',
+    '$nowUtc'
+);
+"@
+
+    Invoke-Sqlite -Config $Config -Sql $insertSql | Out-Null
+    Write-Log -Message "Diagnostic DB insert complete for node $($Node.IP)"
+}
+
 function Complete-MeasurementRun {
     [CmdletBinding()]
     param(
@@ -290,4 +368,3 @@ function Add-NodeJobRecord {
 
     Invoke-Sqlite -Config $Config -Sql $sql | Out-Null
 }
-

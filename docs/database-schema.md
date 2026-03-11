@@ -63,6 +63,32 @@ Final stored measurements with raw payload.
 - `raw_output` TEXT
 - `collected_at_utc` TEXT
 
+### `node_diagnostics`
+Per-node early diagnostic snapshots captured near the scheduled download start and only retained for nodes without a usable result or with throughput at or below the configured threshold.
+
+- `id` INTEGER PK
+- `run_id` TEXT
+- `device_id` TEXT
+- `name` TEXT
+- `ip` TEXT
+- `domain` TEXT
+- `nodeid` TEXT
+- `diagnostic_timestamp_ns` TEXT
+- `diagnosed_at_utc` TEXT
+- `speedtest_delay_seconds` INTEGER
+- `diagnostic_delay_seconds` INTEGER
+- `target_host` TEXT
+- `gateway_probe` TEXT
+- `gateway_probe_kind` TEXT
+- `ping_gateway_loss_pct` REAL
+- `ping_target_loss_pct` REAL
+- `load1` REAL
+- `load5` REAL
+- `load15` REAL
+- `local_path` TEXT
+- `raw_output` TEXT
+- `collected_at_utc` TEXT
+
 ## Indexes
 The schema also creates operational indexes for the main query paths:
 
@@ -74,9 +100,13 @@ The schema also creates operational indexes for the main query paths:
 - `idx_measurements_nodeid` on `measurements(nodeid)`
 - `idx_measurements_run_device_id` on `measurements(run_id, device_id)`
 - `idx_measurements_measured_at_utc` on `measurements(measured_at_utc)`
+- `idx_node_diagnostics_run_id` on `node_diagnostics(run_id)`
+- `idx_node_diagnostics_device_id` on `node_diagnostics(device_id)`
+- `idx_node_diagnostics_run_device_id` on `node_diagnostics(run_id, device_id)`
 
 ## Notes
 - Raw files are also stored in `data/raw/<run_id>/`.
 - Final failed speedtest results are also stored in `measurements`; they use `throughput_mbit = 0` and preserve the raw failure payload.
+- Early diagnostics are written to `data/raw/<run_id>/` for all triggered nodes, but only persisted in `node_diagnostics` when the node has no parsed result or the retained throughput is at or below `NodeDiagnosticsKeepThresholdMbit`.
 - Schema initialization runs automatically inside `collect-node-metrics.ps1`.
 - WAL mode is enabled for the database.

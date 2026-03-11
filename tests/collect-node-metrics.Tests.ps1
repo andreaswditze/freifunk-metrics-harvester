@@ -252,6 +252,29 @@ Describe 'ConvertFrom-MeasurementOutput' {
     }
 }
 
+Describe 'ConvertFrom-NodeDiagnosticOutput' {
+    It 'parses diagnostic summary payloads' {
+        $raw = @(
+            'diagnostic,nodeid=aabbccddeeff target_host="ash-speed.hetzner.com" speedtest_delay_seconds=30 diagnostic_delay_seconds=90 timestamp=1772839860'
+            'diag_summary,load1=0.12 load5=0.34 load15=0.56 gateway_probe="fe80::1" gateway_probe_kind="ipv6" ping_gateway_loss=0 ping_target_loss=25'
+            'diag_section,name=ip_route'
+            'default via 192.0.2.1 dev eth0'
+            'diag_section_end,name=ip_route'
+        ) -join "`n"
+
+        $parsed = ConvertFrom-NodeDiagnosticOutput -RawOutput $raw
+
+        $parsed | Should -Not -BeNullOrEmpty
+        $parsed.NodeId | Should -Be 'aabbccddeeff'
+        $parsed.TargetHost | Should -Be 'ash-speed.hetzner.com'
+        $parsed.SpeedtestDelaySeconds | Should -Be 30
+        $parsed.DiagnosticDelaySeconds | Should -Be 90
+        $parsed.GatewayProbeKind | Should -Be 'ipv6'
+        $parsed.PingTargetLossPct | Should -Be 25
+        $parsed.Load15 | Should -Be 0.56
+    }
+}
+
 Describe 'Resolve-NodeSourceFiles' {
     It 'finds Excel and CSV files recursively' {
         $nested = Join-Path $TestDrive 'a/b/c'
@@ -929,6 +952,53 @@ Describe 'Receive-NodeResults' {
         $files.Count | Should -Be 1
         $files[0].ParsedMeasurement.ResultType | Should -Be 'final_failed'
         $files[0].ParsedMeasurement.ThroughputMbit | Should -Be 0
+    }
+
+    It 'collects diagnostic files separately from measurements' {
+        $mockSsh = Join-Path $TestDrive 'mock-ssh-diagnostic.ps1'
+        @(
+            '$command = $args[-1]'
+            'if ($command -like ''find*'') {'
+            '    @('
+            '        ''__FFMH_FILE_BEGIN__/tmp/harvester/1700000000.txt'''
+            '        ''speedtest,nodeid=aabbccddeeff download_mbit=48.25,target="https://example.invalid/test.bin" 1700000000000000000'''
+            '        ''__FFMH_FILE_END__/tmp/harvester/1700000000.txt'''
+            '        ''__FFMH_FILE_BEGIN__/tmp/harvester/diag-1700000001.txt'''
+            '        ''diagnostic,nodeid=aabbccddeeff target_host="example.invalid" speedtest_delay_seconds=10 diagnostic_delay_seconds=70 timestamp=1700000001000000000'''
+            '        ''diag_summary,load1=0.12 load5=0.23 load15=0.34 gateway_probe="192.0.2.1" gateway_probe_kind="ipv4" ping_gateway_loss=0 ping_target_loss=100'''
+            '        ''__FFMH_FILE_END__/tmp/harvester/diag-1700000001.txt'''
+            '    ) | ForEach-Object { Write-Output $_ }'
+            '    exit 0'
+            '}'
+            'if ($command -like ''rm -f*'') {'
+            '    exit 0'
+            '}'
+            'Write-Output ("unexpected command: {0}" -f $command)'
+            'exit 9'
+        ) | Set-Content -Path $mockSsh
+
+        $rawDir = Join-Path $TestDrive 'raw-diagnostic'
+        New-Item -ItemType Directory -Path $rawDir -Force | Out-Null
+
+        $config = @{
+            SshBinary = $mockSsh
+            SshKeyPath = 'ignore'
+            SshUser = 'root'
+            SshConnectTimeoutSeconds = 1
+            RemoteResultDir = '/tmp/harvester'
+            CollectParallelism = 2
+        }
+        $node = [pscustomobject]@{ DeviceID = 'node-001'; Name = 'Node 1'; IP = '2a03:2260::1'; Domain = 'dom-a' }
+
+        $result = Receive-NodeResults -Config $config -Node $node -RunId 'run-test' -RawDir $rawDir
+        $files = @($result.Files)
+        $diagnostics = @($result.DiagnosticFiles)
+
+        $result.Success | Should -BeTrue
+        $files.Count | Should -Be 1
+        $diagnostics.Count | Should -Be 1
+        $diagnostics[0].ParsedDiagnostic.TargetHost | Should -Be 'example.invalid'
+        $diagnostics[0].ParsedDiagnostic.PingTargetLossPct | Should -Be 100
     }
 }
 

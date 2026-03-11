@@ -17,6 +17,7 @@ Allowed in git:
 Never commit:
 - `src/config.production.ps1`
 - `src/config.production.*`
+- `src/config.development.ps1`
 
 ## Requirements
 - Linux host (`mars`) with PowerShell 7 (`pwsh`)
@@ -59,6 +60,9 @@ Runtime tuning:
 - `TriggerRandomDelayMaxSeconds`
 - `SpeedtestTargetUrl`
 - `SpeedtestTargetBytes`
+- `EnableNodeDiagnostics`
+- `NodeDiagnosticsDelaySeconds`
+- `NodeDiagnosticsKeepThresholdMbit`
 - `RemoteResultDir`
 - `SshConnectTimeoutSeconds`
 - `LogFilePrefix`
@@ -72,7 +76,9 @@ The collector validates these values at startup and aborts early on invalid conf
 - Collecting runs only against nodes that were successfully triggered.
 - Collecting uses up to `CollectParallelism` concurrent SSH sessions.
 - Per node, all `*.txt` files in `RemoteResultDir` are fetched in one SSH stream instead of one `cat` call per file.
-- Parsed measurement files are deleted remotely after a successful download attempt. Files without a measurement line stay on the node and are reported as pending.
+- Each triggered node can also write an early diagnostic snapshot near the planned download start.
+- Parsed measurement and diagnostic files are deleted remotely after a successful download attempt. Files without a recognized measurement or diagnostic line stay on the node and are reported as pending.
+- Diagnostic snapshots are retained locally and in SQLite only for nodes without a parsed result or with throughput at or below `NodeDiagnosticsKeepThresholdMbit`; healthy nodes have their local diagnostic files discarded after evaluation.
 
 ## SSH trust model
 The collector intentionally accepts changing SSH host keys.
