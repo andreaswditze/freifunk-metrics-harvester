@@ -59,14 +59,6 @@ $invokeParams = @{
 if ($RunSshStreaming) {
     $invokeParams['TagFilter'] = @('ssh-streaming')
 }
-else {
-    $excludeTags = @('ssh-streaming')
-    if (-not $IncludeIntegration) {
-        $excludeTags += 'integration'
-    }
-
-    $invokeParams['ExcludeTagFilter'] = $excludeTags
-}
 
 if ($OutputFormat -ne 'None') {
     if ([string]::IsNullOrWhiteSpace($OutputPath)) {
