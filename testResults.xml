@@ -1,139 +1,139 @@
 ﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
-<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="42" errors="0" failures="0" not-run="2" inconclusive="0" ignored="0" skipped="0" invalid="0" date="2026-03-11" time="17:10:52">
-  <environment user="andi" machine-name="SHELDON" clr-version="9.0.10" nunit-version="2.5.8.0" cwd="C:\Users\andi\iCloudDrive\Freifunk\skripte\freifunk-metrics-harvester" user-domain="SHELDON" os-version="10.0.26200" platform="Microsoft Windows 11 Pro|C:\WINDOWS|\Device\Harddisk3\Partition2" />
+<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="42" errors="0" failures="0" not-run="2" inconclusive="0" ignored="0" skipped="0" invalid="0" date="2026-03-11" time="17:22:37">
+  <environment cwd="C:\Users\andi\iCloudDrive\Freifunk\skripte\freifunk-metrics-harvester" os-version="10.0.26200" user-domain="SHELDON" nunit-version="2.5.8.0" user="andi" clr-version="9.0.10" machine-name="SHELDON" platform="Microsoft Windows 11 Pro|C:\WINDOWS|\Device\Harddisk3\Partition2" />
   <culture-info current-culture="de-DE" current-uiculture="de-DE" />
-  <test-suite type="TestFixture" name="Pester" executed="True" result="Success" success="True" time="6.2452" asserts="0" description="Pester">
+  <test-suite type="TestFixture" name="Pester" executed="True" result="Success" success="True" time="6.1351" asserts="0" description="Pester">
     <results>
-      <test-suite type="TestFixture" name="C:\Users\andi\iCloudDrive\Freifunk\skripte\freifunk-metrics-harvester\tests\collect-node-metrics.Tests.ps1" executed="True" result="Success" success="True" time="6.2452" asserts="0" description="C:\Users\andi\iCloudDrive\Freifunk\skripte\freifunk-metrics-harvester\tests\collect-node-metrics.Tests.ps1">
+      <test-suite type="TestFixture" name="C:\Users\andi\iCloudDrive\Freifunk\skripte\freifunk-metrics-harvester\tests\collect-node-metrics.Tests.ps1" executed="True" result="Success" success="True" time="6.1351" asserts="0" description="C:\Users\andi\iCloudDrive\Freifunk\skripte\freifunk-metrics-harvester\tests\collect-node-metrics.Tests.ps1">
         <results>
-          <test-suite type="TestFixture" name="Module entry points" executed="True" result="Success" success="True" time="0.2589" asserts="0" description="Module entry points">
+          <test-suite type="TestFixture" name="Module entry points" executed="True" result="Success" success="True" time="0.2077" asserts="0" description="Module entry points">
             <results>
-              <test-case description="exports collector functions from the module" name="Module entry points.exports collector functions from the module" time="0.1346" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="wrapper script loads the module in no-run mode" name="Module entry points.wrapper script loads the module in no-run mode" time="0.0821" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="exports collector functions from the module" name="Module entry points.exports collector functions from the module" time="0.1131" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="wrapper script loads the module in no-run mode" name="Module entry points.wrapper script loads the module in no-run mode" time="0.0574" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Invoke-CollectNodeMetricsMain" executed="True" result="Success" success="True" time="1.7745" asserts="0" description="Invoke-CollectNodeMetricsMain">
+          <test-suite type="TestFixture" name="Invoke-CollectNodeMetricsMain" executed="True" result="Success" success="True" time="1.7945" asserts="0" description="Invoke-CollectNodeMetricsMain">
             <results>
-              <test-case description="prints a final delivery summary for successful and failed nodes" name="Invoke-CollectNodeMetricsMain.prints a final delivery summary for successful and failed nodes" time="0.8051" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="does not print failure reasons when all nodes succeeded" name="Invoke-CollectNodeMetricsMain.does not print failure reasons when all nodes succeeded" time="0.3099" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="stores diagnostics for successful high-throughput nodes" name="Invoke-CollectNodeMetricsMain.stores diagnostics for successful high-throughput nodes" time="0.3232" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="prints a final delivery summary for successful and failed nodes" name="Invoke-CollectNodeMetricsMain.prints a final delivery summary for successful and failed nodes" time="0.8735" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not print failure reasons when all nodes succeeded" name="Invoke-CollectNodeMetricsMain.does not print failure reasons when all nodes succeeded" time="0.3286" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="stores diagnostics for successful high-throughput nodes" name="Invoke-CollectNodeMetricsMain.stores diagnostics for successful high-throughput nodes" time="0.3203" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="ConvertFrom-MeasurementOutput" executed="True" result="Success" success="True" time="1.9152" asserts="0" description="ConvertFrom-MeasurementOutput">
+          <test-suite type="TestFixture" name="ConvertFrom-MeasurementOutput" executed="True" result="Success" success="True" time="1.9232" asserts="0" description="ConvertFrom-MeasurementOutput">
             <results>
-              <test-case description="parses valid line protocol" name="ConvertFrom-MeasurementOutput.parses valid line protocol" time="0.0629" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="parses valid line protocol when banner text is present" name="ConvertFrom-MeasurementOutput.parses valid line protocol when banner text is present" time="0.01" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="returns null for invalid payload" name="ConvertFrom-MeasurementOutput.returns null for invalid payload" time="0.0071" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="parses final failed speedtest markers with zero throughput" name="ConvertFrom-MeasurementOutput.parses final failed speedtest markers with zero throughput" time="0.0248" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="parses a complete download at the exact timeout as success" name="ConvertFrom-MeasurementOutput.parses a complete download at the exact timeout as success" time="0.0176" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="returns null for empty payload" name="ConvertFrom-MeasurementOutput.returns null for empty payload" time="0.0066" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="parses valid line protocol" name="ConvertFrom-MeasurementOutput.parses valid line protocol" time="0.0566" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="parses valid line protocol when banner text is present" name="ConvertFrom-MeasurementOutput.parses valid line protocol when banner text is present" time="0.0103" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns null for invalid payload" name="ConvertFrom-MeasurementOutput.returns null for invalid payload" time="0.0054" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="parses final failed speedtest markers with zero throughput" name="ConvertFrom-MeasurementOutput.parses final failed speedtest markers with zero throughput" time="0.0241" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="parses a complete download at the exact timeout as success" name="ConvertFrom-MeasurementOutput.parses a complete download at the exact timeout as success" time="0.0137" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns null for empty payload" name="ConvertFrom-MeasurementOutput.returns null for empty payload" time="0.0064" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Initialize-Database and Save-Measurement" executed="True" result="Success" success="True" time="2.6867" asserts="0" description="Initialize-Database and Save-Measurement">
+          <test-suite type="TestFixture" name="Initialize-Database and Save-Measurement" executed="True" result="Success" success="True" time="2.7172" asserts="0" description="Initialize-Database and Save-Measurement">
             <results>
-              <test-case description="stores parsed transfer metadata for failed timeout measurements" name="Initialize-Database and Save-Measurement.stores parsed transfer metadata for failed timeout measurements" time="0.3813" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="stores extended node diagnostic metadata" name="Initialize-Database and Save-Measurement.stores extended node diagnostic metadata" time="0.3483" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="stores parsed transfer metadata for failed timeout measurements" name="Initialize-Database and Save-Measurement.stores parsed transfer metadata for failed timeout measurements" time="0.433" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="stores extended node diagnostic metadata" name="Initialize-Database and Save-Measurement.stores extended node diagnostic metadata" time="0.3241" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="ConvertFrom-NodeDiagnosticOutput" executed="True" result="Success" success="True" time="2.7576" asserts="0" description="ConvertFrom-NodeDiagnosticOutput">
+          <test-suite type="TestFixture" name="ConvertFrom-NodeDiagnosticOutput" executed="True" result="Success" success="True" time="2.7695" asserts="0" description="ConvertFrom-NodeDiagnosticOutput">
             <results>
-              <test-case description="parses diagnostic summary payloads" name="ConvertFrom-NodeDiagnosticOutput.parses diagnostic summary payloads" time="0.0607" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="parses diagnostic summary payloads" name="ConvertFrom-NodeDiagnosticOutput.parses diagnostic summary payloads" time="0.0381" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Resolve-NodeSourceFiles" executed="True" result="Success" success="True" time="2.8506" asserts="0" description="Resolve-NodeSourceFiles">
+          <test-suite type="TestFixture" name="Resolve-NodeSourceFiles" executed="True" result="Success" success="True" time="2.8955" asserts="0" description="Resolve-NodeSourceFiles">
             <results>
-              <test-case description="finds Excel and CSV files recursively" name="Resolve-NodeSourceFiles.finds Excel and CSV files recursively" time="0.0701" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="finds Excel and CSV files recursively" name="Resolve-NodeSourceFiles.finds Excel and CSV files recursively" time="0.1008" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Get-TestNodesFromConfig" executed="True" result="Success" success="True" time="2.8776" asserts="0" description="Get-TestNodesFromConfig">
+          <test-suite type="TestFixture" name="Get-TestNodesFromConfig" executed="True" result="Success" success="True" time="2.9188" asserts="0" description="Get-TestNodesFromConfig">
             <results>
-              <test-case description="builds deterministic test nodes from configured IPs" name="Get-TestNodesFromConfig.builds deterministic test nodes from configured IPs" time="0.0206" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="builds deterministic test nodes from configured IPs" name="Get-TestNodesFromConfig.builds deterministic test nodes from configured IPs" time="0.017" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Convert-NodeTimestampToUtc" executed="True" result="Success" success="True" time="2.8995" asserts="0" description="Convert-NodeTimestampToUtc">
+          <test-suite type="TestFixture" name="Convert-NodeTimestampToUtc" executed="True" result="Success" success="True" time="2.9416" asserts="0" description="Convert-NodeTimestampToUtc">
             <results>
-              <test-case description="handles epoch seconds from nodes" name="Convert-NodeTimestampToUtc.handles epoch seconds from nodes" time="0.0086" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="handles nanoseconds" name="Convert-NodeTimestampToUtc.handles nanoseconds" time="0.0067" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles epoch seconds from nodes" name="Convert-NodeTimestampToUtc.handles epoch seconds from nodes" time="0.0042" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles nanoseconds" name="Convert-NodeTimestampToUtc.handles nanoseconds" time="0.0113" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Wait-WithProgress" executed="True" result="Success" success="True" time="3.3832" asserts="0" description="Wait-WithProgress">
+          <test-suite type="TestFixture" name="Wait-WithProgress" executed="True" result="Success" success="True" time="3.3839" asserts="0" description="Wait-WithProgress">
             <results>
-              <test-case description="stops early when all nodes are finished" name="Wait-WithProgress.stops early when all nodes are finished" time="0.1347" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="keeps updating elapsed time while the poll is still running" name="Wait-WithProgress.keeps updating elapsed time while the poll is still running" time="0.1261" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="polls only the remaining nodes after a successful update" name="Wait-WithProgress.polls only the remaining nodes after a successful update" time="0.107" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="keeps the last finished count when a later poll fails" name="Wait-WithProgress.keeps the last finished count when a later poll fails" time="0.1093" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="stops early when all nodes are finished" name="Wait-WithProgress.stops early when all nodes are finished" time="0.136" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps updating elapsed time while the poll is still running" name="Wait-WithProgress.keeps updating elapsed time while the poll is still running" time="0.1221" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="polls only the remaining nodes after a successful update" name="Wait-WithProgress.polls only the remaining nodes after a successful update" time="0.0899" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps the last finished count when a later poll fails" name="Wait-WithProgress.keeps the last finished count when a later poll fails" time="0.0872" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Receive-NodeResultCountPoll" executed="True" result="Success" success="True" time="3.8122" asserts="0" description="Receive-NodeResultCountPoll">
+          <test-suite type="TestFixture" name="Receive-NodeResultCountPoll" executed="True" result="Success" success="True" time="3.8102" asserts="0" description="Receive-NodeResultCountPoll">
             <results>
-              <test-case description="returns poll results and removes the finished job" name="Receive-NodeResultCountPoll.returns poll results and removes the finished job" time="0.4193" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns poll results and removes the finished job" name="Receive-NodeResultCountPoll.returns poll results and removes the finished job" time="0.4155" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Test-NodeReleaseSupported" executed="True" result="Success" success="True" time="3.8461" asserts="0" description="Test-NodeReleaseSupported">
+          <test-suite type="TestFixture" name="Test-NodeReleaseSupported" executed="True" result="Success" success="True" time="3.8453" asserts="0" description="Test-NodeReleaseSupported">
             <results>
-              <test-case description="accepts 1.5.0 and newer releases" name="Test-NodeReleaseSupported.accepts 1.5.0 and newer releases" time="0.018" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="rejects empty, invalid, and older releases" name="Test-NodeReleaseSupported.rejects empty, invalid, and older releases" time="0.0087" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="accepts 1.5.0 and newer releases" name="Test-NodeReleaseSupported.accepts 1.5.0 and newer releases" time="0.0188" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects empty, invalid, and older releases" name="Test-NodeReleaseSupported.rejects empty, invalid, and older releases" time="0.0069" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Import-NodeListFromExcel" executed="True" result="Success" success="True" time="4.5803" asserts="0" description="Import-NodeListFromExcel">
+          <test-suite type="TestFixture" name="Import-NodeListFromExcel" executed="True" result="Success" success="True" time="4.5031" asserts="0" description="Import-NodeListFromExcel">
             <results>
-              <test-case description="imports only nodes with IP and release 1.5.0 or newer from csv" name="Import-NodeListFromExcel.imports only nodes with IP and release 1.5.0 or newer from csv" time="0.7211" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="imports only nodes with IP and release 1.5.0 or newer from csv" name="Import-NodeListFromExcel.imports only nodes with IP and release 1.5.0 or newer from csv" time="0.6502" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Get-NodeTriggerAssignments" executed="True" result="Success" success="True" time="4.678" asserts="0" description="Get-NodeTriggerAssignments">
+          <test-suite type="TestFixture" name="Get-NodeTriggerAssignments" executed="True" result="Success" success="True" time="4.6156" asserts="0" description="Get-NodeTriggerAssignments">
             <results>
-              <test-case description="spreads unknown and slow nodes across the beginning of the delay window" name="Get-NodeTriggerAssignments.spreads unknown and slow nodes across the beginning of the delay window" time="0.0741" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="does not assign all-unknown nodes to delay 0" name="Get-NodeTriggerAssignments.does not assign all-unknown nodes to delay 0" time="0.0164" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="spreads unknown and slow nodes across the beginning of the delay window" name="Get-NodeTriggerAssignments.spreads unknown and slow nodes across the beginning of the delay window" time="0.075" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not assign all-unknown nodes to delay 0" name="Get-NodeTriggerAssignments.does not assign all-unknown nodes to delay 0" time="0.0138" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Invoke-NodeTriggerBatch" executed="True" result="Success" success="True" time="4.7595" asserts="0" description="Invoke-NodeTriggerBatch">
+          <test-suite type="TestFixture" name="Invoke-NodeTriggerBatch" executed="True" result="Success" success="True" time="4.6765" asserts="0" description="Invoke-NodeTriggerBatch">
             <results>
-              <test-case description="triggers lower assigned delays first" name="Invoke-NodeTriggerBatch.triggers lower assigned delays first" time="0.0725" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="triggers lower assigned delays first" name="Invoke-NodeTriggerBatch.triggers lower assigned delays first" time="0.0548" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Get-NodeTriggerCommandInfo" executed="True" result="Success" success="True" time="4.8276" asserts="0" description="Get-NodeTriggerCommandInfo">
+          <test-suite type="TestFixture" name="Get-NodeTriggerCommandInfo" executed="True" result="Success" success="True" time="4.7266" asserts="0" description="Get-NodeTriggerCommandInfo">
             <results>
-              <test-case description="uses controller-assigned delay and target settings" name="Get-NodeTriggerCommandInfo.uses controller-assigned delay and target settings" time="0.0562" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="uses controller-assigned delay and target settings" name="Get-NodeTriggerCommandInfo.uses controller-assigned delay and target settings" time="0.0437" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Assert-ValidConfig" executed="True" result="Success" success="True" time="4.9445" asserts="0" description="Assert-ValidConfig">
+          <test-suite type="TestFixture" name="Assert-ValidConfig" executed="True" result="Success" success="True" time="4.8214" asserts="0" description="Assert-ValidConfig">
             <results>
-              <test-case description="normalizes valid config values" name="Assert-ValidConfig.normalizes valid config values" time="0.0587" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="rejects invalid speedtest url schemes" name="Assert-ValidConfig.rejects invalid speedtest url schemes" time="0.0236" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="rejects non-positive collect wait timeout" name="Assert-ValidConfig.rejects non-positive collect wait timeout" time="0.0099" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="rejects non-positive collect parallelism" name="Assert-ValidConfig.rejects non-positive collect parallelism" time="0.0141" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="normalizes valid config values" name="Assert-ValidConfig.normalizes valid config values" time="0.0402" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects invalid speedtest url schemes" name="Assert-ValidConfig.rejects invalid speedtest url schemes" time="0.0208" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects non-positive collect wait timeout" name="Assert-ValidConfig.rejects non-positive collect wait timeout" time="0.0097" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects non-positive collect parallelism" name="Assert-ValidConfig.rejects non-positive collect parallelism" time="0.0159" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Convert-CollectStreamToFiles" executed="True" result="Success" success="True" time="4.9736" asserts="0" description="Convert-CollectStreamToFiles">
+          <test-suite type="TestFixture" name="Convert-CollectStreamToFiles" executed="True" result="Success" success="True" time="4.8438" asserts="0" description="Convert-CollectStreamToFiles">
             <results>
-              <test-case description="parses multiple streamed remote files" name="Convert-CollectStreamToFiles.parses multiple streamed remote files" time="0.0189" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="parses multiple streamed remote files" name="Convert-CollectStreamToFiles.parses multiple streamed remote files" time="0.0154" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Receive-NodeResults" executed="True" result="Success" success="True" time="5.1858" asserts="0" description="Receive-NodeResults">
+          <test-suite type="TestFixture" name="Receive-NodeResults" executed="True" result="Success" success="True" time="5.0664" asserts="0" description="Receive-NodeResults">
             <results>
-              <test-case description="keeps downloaded measurements when remote delete fails" name="Receive-NodeResults.keeps downloaded measurements when remote delete fails" time="0.0685" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="treats final failed results as collected measurements" name="Receive-NodeResults.treats final failed results as collected measurements" time="0.0376" asserts="0" success="True" result="Success" executed="True" />
-              <test-case description="collects diagnostic files separately from measurements" name="Receive-NodeResults.collects diagnostic files separately from measurements" time="0.0564" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps downloaded measurements when remote delete fails" name="Receive-NodeResults.keeps downloaded measurements when remote delete fails" time="0.0566" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="treats final failed results as collected measurements" name="Receive-NodeResults.treats final failed results as collected measurements" time="0.0531" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="collects diagnostic files separately from measurements" name="Receive-NodeResults.collects diagnostic files separately from measurements" time="0.0592" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Get-NodeTriggerCommandInfo" executed="True" result="Success" success="True" time="5.1986" asserts="0" description="Get-NodeTriggerCommandInfo">
+          <test-suite type="TestFixture" name="Get-NodeTriggerCommandInfo" executed="True" result="Success" success="True" time="5.0799" asserts="0" description="Get-NodeTriggerCommandInfo">
             <results>
-              <test-case description="does not join background commands with invalid ampersand semicolons" name="Get-NodeTriggerCommandInfo.does not join background commands with invalid ampersand semicolons" time="0.0061" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not join background commands with invalid ampersand semicolons" name="Get-NodeTriggerCommandInfo.does not join background commands with invalid ampersand semicolons" time="0.0058" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Get-RemoteRunResultDir" executed="True" result="Success" success="True" time="5.211" asserts="0" description="Get-RemoteRunResultDir">
+          <test-suite type="TestFixture" name="Get-RemoteRunResultDir" executed="True" result="Success" success="True" time="5.0926" asserts="0" description="Get-RemoteRunResultDir">
             <results>
-              <test-case description="builds a run-specific remote directory" name="Get-RemoteRunResultDir.builds a run-specific remote directory" time="0.0053" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="builds a run-specific remote directory" name="Get-RemoteRunResultDir.builds a run-specific remote directory" time="0.0055" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Get-FinishedNodeResultCountBatch" executed="True" result="Success" success="True" time="5.3282" asserts="0" description="Get-FinishedNodeResultCountBatch">
+          <test-suite type="TestFixture" name="Get-FinishedNodeResultCountBatch" executed="True" result="Success" success="True" time="5.1969" asserts="0" description="Get-FinishedNodeResultCountBatch">
             <results>
-              <test-case description="counts nodes with finished remote result files" name="Get-FinishedNodeResultCountBatch.counts nodes with finished remote result files" time="0.1003" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="counts nodes with finished remote result files" name="Get-FinishedNodeResultCountBatch.counts nodes with finished remote result files" time="0.0959" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
-          <test-suite type="TestFixture" name="Invoke-NodeCollectBatch" executed="True" result="Success" success="True" time="5.4813" asserts="0" description="Invoke-NodeCollectBatch">
+          <test-suite type="TestFixture" name="Invoke-NodeCollectBatch" executed="True" result="Success" success="True" time="5.3529" asserts="0" description="Invoke-NodeCollectBatch">
             <results>
-              <test-case description="collects multiple nodes in parallel" name="Invoke-NodeCollectBatch.collects multiple nodes in parallel" time="0.1291" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="collects multiple nodes in parallel" name="Invoke-NodeCollectBatch.collects multiple nodes in parallel" time="0.1296" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
         </results>

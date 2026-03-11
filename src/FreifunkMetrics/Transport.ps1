@@ -1427,8 +1427,7 @@ function ConvertFrom-NodeDiagnosticOutput {
     $headerRegex = '^diagnostic,nodeid=(?<nodeid>[^ ]+) target_host="(?<target>[^"]*)" speedtest_delay_seconds=(?<speedtest_delay>-?[0-9]+) diagnostic_delay_seconds=(?<diag_delay>-?[0-9]+) timestamp=(?<timestamp>[0-9]+)$'
 
     $lines = @(
-        $RawOutput -split '?
-' |
+        $RawOutput -split '\r?\n' |
             ForEach-Object { Convert-ToTrimmedString -Value $_ } |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     )
