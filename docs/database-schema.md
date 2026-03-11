@@ -92,6 +92,16 @@ Per-node early diagnostic snapshots captured near the scheduled download start f
 - `load1` REAL
 - `load5` REAL
 - `load15` REAL
+- `target_ipv4` TEXT
+- `target_ipv6` TEXT
+- `route_get_ipv4` TEXT
+- `route_get_ipv6` TEXT
+- `wget_stderr` TEXT
+- `target_resolution` TEXT
+- `route_get` TEXT
+- `ubus_network_dump` TEXT
+- `ubus_ifstatus_wan` TEXT
+- `ubus_ifstatus_wan6` TEXT
 - `local_path` TEXT
 - `raw_output` TEXT
 - `collected_at_utc` TEXT

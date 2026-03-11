@@ -1,5 +1,6 @@
 /src/config.production.*
 /src/config.production.ps1
+/src/config.development.ps1
 /data/*
 !/data/.gitkeep
 !/data/raw/
@@ -8,3 +9,4 @@
 /log/
 /temp/*
 !/temp/.gitkeep
+

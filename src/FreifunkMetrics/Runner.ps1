@@ -123,6 +123,16 @@ function Save-CollectedNodeDiagnostics {
                 Load1                  = $diagnosticFile.ParsedDiagnostic.Load1
                 Load5                  = $diagnosticFile.ParsedDiagnostic.Load5
                 Load15                 = $diagnosticFile.ParsedDiagnostic.Load15
+                TargetIPv4             = $diagnosticFile.ParsedDiagnostic.TargetIPv4
+                TargetIPv6             = $diagnosticFile.ParsedDiagnostic.TargetIPv6
+                RouteGetIPv4           = $diagnosticFile.ParsedDiagnostic.RouteGetIPv4
+                RouteGetIPv6           = $diagnosticFile.ParsedDiagnostic.RouteGetIPv6
+                WgetStderr             = $diagnosticFile.ParsedDiagnostic.WgetStderr
+                TargetResolution       = $diagnosticFile.ParsedDiagnostic.TargetResolution
+                RouteGet               = $diagnosticFile.ParsedDiagnostic.RouteGet
+                UbusNetworkDump        = $diagnosticFile.ParsedDiagnostic.UbusNetworkDump
+                UbusIfstatusWan        = $diagnosticFile.ParsedDiagnostic.UbusIfstatusWan
+                UbusIfstatusWan6       = $diagnosticFile.ParsedDiagnostic.UbusIfstatusWan6
                 LocalPath              = $diagnosticFile.LocalPath
                 RawOutput              = $diagnosticFile.RawOutput
             })

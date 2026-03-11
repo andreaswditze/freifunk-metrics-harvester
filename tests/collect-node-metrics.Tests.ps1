@@ -235,7 +235,23 @@ Describe 'Invoke-CollectNodeMetricsMain' {
                 LocalPath = 'diag-fast.txt'
                 RawOutput = @(
                     'diagnostic,nodeid=cc target_host="example.invalid" speedtest_delay_seconds=30 diagnostic_delay_seconds=90 timestamp=1772839800'
-                    'diag_summary,load1=0.10 load5=0.20 load15=0.30 gateway_probe="fe80::1" gateway_probe_kind="ipv6" ping_gateway_loss=0 ping_target_loss=0'
+                    'diag_summary,load1=0.10 load5=0.20 load15=0.30 gateway_probe="fe80::1" gateway_probe_kind="ipv6" ping_gateway_loss=0 ping_target_loss=0 target_ipv4="192.0.2.10" target_ipv6="2001:db8::10" route_get_ipv4="192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20" route_get_ipv6="2001:db8::10 from 2001:db8::20 via fe80::1 dev br-client" wget_stderr="wget: connection reset by peer"'
+                    'diag_section,name=target_resolution'
+                    'Name: example.invalid'
+                    'Address 1: 192.0.2.10'
+                    'diag_section_end,name=target_resolution'
+                    'diag_section,name=route_get'
+                    '192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'
+                    'diag_section_end,name=route_get'
+                    'diag_section,name=ubus_network_dump'
+                    '{"interface":[]}'
+                    'diag_section_end,name=ubus_network_dump'
+                    'diag_section,name=ubus_ifstatus_wan'
+                    '{"up":true}'
+                    'diag_section_end,name=ubus_ifstatus_wan'
+                    'diag_section,name=ubus_ifstatus_wan6'
+                    '{"up":false}'
+                    'diag_section_end,name=ubus_ifstatus_wan6'
                 ) -join "`n"
                 ParsedDiagnostic = [pscustomobject]@{
                     NodeId = 'cc'
@@ -250,6 +266,16 @@ Describe 'Invoke-CollectNodeMetricsMain' {
                     Load1 = 0.10
                     Load5 = 0.20
                     Load15 = 0.30
+                    TargetIPv4 = '192.0.2.10'
+                    TargetIPv6 = '2001:db8::10'
+                    RouteGetIPv4 = '192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'
+                    RouteGetIPv6 = '2001:db8::10 from 2001:db8::20 via fe80::1 dev br-client'
+                    WgetStderr = 'wget: connection reset by peer'
+                    TargetResolution = "Name: example.invalid`nAddress 1: 192.0.2.10"
+                    RouteGet = '192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'
+                    UbusNetworkDump = '{"interface":[]}'
+                    UbusIfstatusWan = '{"up":true}'
+                    UbusIfstatusWan6 = '{"up":false}'
                 }
             }
 
@@ -291,7 +317,9 @@ Describe 'Invoke-CollectNodeMetricsMain' {
                     $RunId -eq 'run-diagnostics' -and
                     $Node.DeviceID -eq 'node-020' -and
                     $Diagnostic.NodeId -eq 'cc' -and
-                    $Diagnostic.TargetHost -eq 'example.invalid'
+                    $Diagnostic.TargetHost -eq 'example.invalid' -and
+                    $Diagnostic.TargetIPv4 -eq '192.0.2.10' -and
+                    $Diagnostic.WgetStderr -eq 'wget: connection reset by peer'
                 }
                 Assert-MockCalled Write-NodeActionLog -Times 1 -ParameterFilter {
                     $Node.DeviceID -eq 'node-020' -and
@@ -421,16 +449,86 @@ Describe 'Initialize-Database and Save-Measurement' {
             $row | Should -Be 'final_failed|speedtest_timeout|104857600|104857600|180.000321|180|124'
         }
     }
+
+    It 'stores extended node diagnostic metadata' {
+        InModuleScope FreifunkMetrics {
+            $baseDir = Join-Path $TestDrive 'db-diagnostic-metadata'
+            New-Item -ItemType Directory -Path $baseDir -Force | Out-Null
+
+            $config = @{
+                DatabasePath = (Join-Path $baseDir 'metrics.db')
+                SQLiteBinary = 'sqlite3'
+                LogDir = $baseDir
+            }
+            $node = [pscustomobject]@{
+                DeviceID = 'node-diagnostic'
+                Name = 'Diagnostic Node'
+                IP = '2a03:2260::beef'
+                Domain = 'dom-diagnostic'
+            }
+            $diagnostic = [pscustomobject]@{
+                NodeId = 'aabbccddeeff'
+                TargetHost = 'ash-speed.hetzner.com'
+                SpeedtestDelaySeconds = 30
+                DiagnosticDelaySeconds = 90
+                TimestampNs = '1772839860'
+                GatewayProbe = 'fe80::1'
+                GatewayProbeKind = 'ipv6'
+                PingGatewayLossPct = 0
+                PingTargetLossPct = 25
+                Load1 = 0.12
+                Load5 = 0.34
+                Load15 = 0.56
+                TargetIPv4 = '192.0.2.10'
+                TargetIPv6 = '2001:db8::10'
+                RouteGetIPv4 = '192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'
+                RouteGetIPv6 = '2001:db8::10 from 2001:db8::20 via fe80::1 dev br-client'
+                WgetStderr = 'wget: connection reset by peer'
+                TargetResolution = 'Name: ash-speed.hetzner.com Address 1: 192.0.2.10'
+                RouteGet = '192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'
+                UbusNetworkDump = '{"interface":[]}'
+                UbusIfstatusWan = '{"up":true}'
+                UbusIfstatusWan6 = '{"up":false}'
+                LocalPath = 'diag-aabb.txt'
+                RawOutput = 'diagnostic raw'
+            }
+
+            Mock Write-Log {}
+
+            Initialize-Database -Config $config
+            Save-NodeDiagnostic -Config $config -Node $node -RunId 'run-diagnostic' -Diagnostic $diagnostic
+
+            $row = & sqlite3 $config.DatabasePath "select target_ipv4 || '|' || target_ipv6 || '|' || route_get_ipv4 || '|' || wget_stderr || '|' || target_resolution || '|' || ubus_ifstatus_wan6 from node_diagnostics where run_id='run-diagnostic';"
+            $LASTEXITCODE | Should -Be 0
+            $row | Should -Be '192.0.2.10|2001:db8::10|192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20|wget: connection reset by peer|Name: ash-speed.hetzner.com Address 1: 192.0.2.10|{"up":false}'
+        }
+    }
 }
 
 Describe 'ConvertFrom-NodeDiagnosticOutput' {
     It 'parses diagnostic summary payloads' {
         $raw = @(
             'diagnostic,nodeid=aabbccddeeff target_host="ash-speed.hetzner.com" speedtest_delay_seconds=30 diagnostic_delay_seconds=90 timestamp=1772839860'
-            'diag_summary,load1=0.12 load5=0.34 load15=0.56 gateway_probe="fe80::1" gateway_probe_kind="ipv6" ping_gateway_loss=0 ping_target_loss=25'
+            'diag_summary,load1=0.12 load5=0.34 load15=0.56 gateway_probe="fe80::1" gateway_probe_kind="ipv6" ping_gateway_loss=0 ping_target_loss=25 target_ipv4="192.0.2.10" target_ipv6="2001:db8::10" route_get_ipv4="192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20" route_get_ipv6="2001:db8::10 from 2001:db8::20 via fe80::1 dev br-client" wget_stderr="wget: connection reset by peer"'
             'diag_section,name=ip_route'
             'default via 192.0.2.1 dev eth0'
             'diag_section_end,name=ip_route'
+            'diag_section,name=target_resolution'
+            'Name: ash-speed.hetzner.com'
+            'Address 1: 192.0.2.10'
+            'diag_section_end,name=target_resolution'
+            'diag_section,name=route_get'
+            '192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'
+            'diag_section_end,name=route_get'
+            'diag_section,name=ubus_network_dump'
+            '{"interface":[]}'
+            'diag_section_end,name=ubus_network_dump'
+            'diag_section,name=ubus_ifstatus_wan'
+            '{"up":true}'
+            'diag_section_end,name=ubus_ifstatus_wan'
+            'diag_section,name=ubus_ifstatus_wan6'
+            '{"up":false}'
+            'diag_section_end,name=ubus_ifstatus_wan6'
         ) -join "`n"
 
         $parsed = ConvertFrom-NodeDiagnosticOutput -RawOutput $raw
@@ -443,6 +541,12 @@ Describe 'ConvertFrom-NodeDiagnosticOutput' {
         $parsed.GatewayProbeKind | Should -Be 'ipv6'
         $parsed.PingTargetLossPct | Should -Be 25
         $parsed.Load15 | Should -Be 0.56
+        $parsed.TargetIPv4 | Should -Be '192.0.2.10'
+        $parsed.TargetIPv6 | Should -Be '2001:db8::10'
+        $parsed.RouteGetIPv4 | Should -Be '192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'
+        $parsed.WgetStderr | Should -Be 'wget: connection reset by peer'
+        $parsed.TargetResolution | Should -Be "Name: ash-speed.hetzner.com`nAddress 1: 192.0.2.10"
+        $parsed.UbusIfstatusWan6 | Should -Be '{"up":false}'
     }
 }
 
@@ -1166,7 +1270,23 @@ Describe 'Receive-NodeResults' {
             '        ''__FFMH_FILE_END__/tmp/harvester/1700000000.txt'''
             '        ''__FFMH_FILE_BEGIN__/tmp/harvester/diag-1700000001.txt'''
             '        ''diagnostic,nodeid=aabbccddeeff target_host="example.invalid" speedtest_delay_seconds=10 diagnostic_delay_seconds=70 timestamp=1700000001000000000'''
-            '        ''diag_summary,load1=0.12 load5=0.23 load15=0.34 gateway_probe="192.0.2.1" gateway_probe_kind="ipv4" ping_gateway_loss=0 ping_target_loss=100'''
+            '        ''diag_summary,load1=0.12 load5=0.23 load15=0.34 gateway_probe="192.0.2.1" gateway_probe_kind="ipv4" ping_gateway_loss=0 ping_target_loss=100 target_ipv4="192.0.2.10" target_ipv6="2001:db8::10" route_get_ipv4="192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20" route_get_ipv6="2001:db8::10 from 2001:db8::20 via fe80::1 dev br-client" wget_stderr="wget: connection reset by peer"'''
+            '        ''diag_section,name=target_resolution'''
+            '        ''Name: example.invalid'''
+            '        ''Address 1: 192.0.2.10'''
+            '        ''diag_section_end,name=target_resolution'''
+            '        ''diag_section,name=route_get'''
+            '        ''192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.20'''
+            '        ''diag_section_end,name=route_get'''
+            '        ''diag_section,name=ubus_network_dump'''
+            '        ''{"interface":[]}'''
+            '        ''diag_section_end,name=ubus_network_dump'''
+            '        ''diag_section,name=ubus_ifstatus_wan'''
+            '        ''{"up":true}'''
+            '        ''diag_section_end,name=ubus_ifstatus_wan'''
+            '        ''diag_section,name=ubus_ifstatus_wan6'''
+            '        ''{"up":false}'''
+            '        ''diag_section_end,name=ubus_ifstatus_wan6'''
             '        ''__FFMH_FILE_END__/tmp/harvester/diag-1700000001.txt'''
             '    ) | ForEach-Object { Write-Output $_ }'
             '    exit 0'
@@ -1200,6 +1320,9 @@ Describe 'Receive-NodeResults' {
         $diagnostics.Count | Should -Be 1
         $diagnostics[0].ParsedDiagnostic.TargetHost | Should -Be 'example.invalid'
         $diagnostics[0].ParsedDiagnostic.PingTargetLossPct | Should -Be 100
+        $diagnostics[0].ParsedDiagnostic.TargetIPv4 | Should -Be '192.0.2.10'
+        $diagnostics[0].ParsedDiagnostic.WgetStderr | Should -Be 'wget: connection reset by peer'
+        $diagnostics[0].ParsedDiagnostic.UbusIfstatusWan | Should -Be '{"up":true}'
     }
 }
 

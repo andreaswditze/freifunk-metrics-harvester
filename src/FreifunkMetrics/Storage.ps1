@@ -39,6 +39,47 @@ function ConvertTo-SqlEscapedLiteral {
     return $Value.Replace("'", "''")
 }
 
+function Get-SqliteTableColumns {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$TableName
+    )
+
+    $columns = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($row in @(Invoke-Sqlite -Config $Config -Sql ("PRAGMA table_info($TableName);"))) {
+        $parts = @([string]$row -split '\|', 6)
+        if ($parts.Count -ge 2) {
+            [void]$columns.Add((Convert-ToTrimmedString -Value $parts[1]))
+        }
+    }
+
+    return $columns
+}
+
+function Ensure-SqliteColumn {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$TableName,
+        [Parameter(Mandatory = $true)]
+        [string]$ColumnName,
+        [Parameter(Mandatory = $true)]
+        [string]$Definition
+    )
+
+    $columns = Get-SqliteTableColumns -Config $Config -TableName $TableName
+    if ($columns.Contains($ColumnName)) {
+        return
+    }
+
+    Invoke-Sqlite -Config $Config -Sql ("ALTER TABLE $TableName ADD COLUMN $ColumnName $Definition;") | Out-Null
+}
+
 function Initialize-Database {
     [CmdletBinding()]
     param(
@@ -130,6 +171,16 @@ CREATE TABLE IF NOT EXISTS node_diagnostics (
     load1 REAL,
     load5 REAL,
     load15 REAL,
+    target_ipv4 TEXT,
+    target_ipv6 TEXT,
+    route_get_ipv4 TEXT,
+    route_get_ipv6 TEXT,
+    wget_stderr TEXT,
+    target_resolution TEXT,
+    route_get TEXT,
+    ubus_network_dump TEXT,
+    ubus_ifstatus_wan TEXT,
+    ubus_ifstatus_wan6 TEXT,
     local_path TEXT,
     raw_output TEXT NOT NULL,
     collected_at_utc TEXT NOT NULL
@@ -149,6 +200,16 @@ CREATE INDEX IF NOT EXISTS idx_node_diagnostics_run_device_id ON node_diagnostic
 "@
 
     Invoke-Sqlite -Config $Config -Sql $ddl | Out-Null
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'target_ipv4' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'target_ipv6' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'route_get_ipv4' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'route_get_ipv6' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'wget_stderr' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'target_resolution' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'route_get' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'ubus_network_dump' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'ubus_ifstatus_wan' -Definition 'TEXT'
+    Ensure-SqliteColumn -Config $Config -TableName 'node_diagnostics' -ColumnName 'ubus_ifstatus_wan6' -Definition 'TEXT'
     Write-Log -Message "Database initialized: $($Config.DatabasePath)"
 }
 
@@ -320,7 +381,10 @@ function Save-NodeDiagnostic {
 INSERT INTO node_diagnostics (
     run_id, device_id, name, ip, domain, nodeid, diagnostic_timestamp_ns, diagnosed_at_utc,
     speedtest_delay_seconds, diagnostic_delay_seconds, target_host, gateway_probe, gateway_probe_kind,
-    ping_gateway_loss_pct, ping_target_loss_pct, load1, load5, load15, local_path, raw_output, collected_at_utc
+    ping_gateway_loss_pct, ping_target_loss_pct, load1, load5, load15,
+    target_ipv4, target_ipv6, route_get_ipv4, route_get_ipv6, wget_stderr,
+    target_resolution, route_get, ubus_network_dump, ubus_ifstatus_wan, ubus_ifstatus_wan6,
+    local_path, raw_output, collected_at_utc
 ) VALUES (
     '$((ConvertTo-SqlEscapedLiteral -Value $RunId))',
     '$((ConvertTo-SqlEscapedLiteral -Value $Node.DeviceID))',
@@ -340,6 +404,16 @@ INSERT INTO node_diagnostics (
     $([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.###}', [double]$Diagnostic.Load1)),
     $([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.###}', [double]$Diagnostic.Load5)),
     $([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0:0.###}', [double]$Diagnostic.Load15)),
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.TargetIPv4))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.TargetIPv6))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.RouteGetIPv4))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.RouteGetIPv6))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.WgetStderr))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.TargetResolution))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.RouteGet))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.UbusNetworkDump))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.UbusIfstatusWan))',
+    '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.UbusIfstatusWan6))',
     '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.LocalPath))',
     '$((ConvertTo-SqlEscapedLiteral -Value $Diagnostic.RawOutput))',
     '$nowUtc'

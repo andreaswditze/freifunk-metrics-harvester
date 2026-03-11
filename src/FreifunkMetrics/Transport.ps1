@@ -298,6 +298,431 @@ function Get-NodeTriggerCommandInfo {
     $diagnostics = Get-NodeDiagnosticsSettings -Config $Config
     $diagnosticDelaySeconds = $delaySeconds + $diagnostics.DelaySeconds
     $targetHost = Convert-ToShellSingleQuoted -Value (Get-NodeDiagnosticsTargetHost -Config $Config)
+    $safeRunId = Convert-ToShellSingleQuoted -Value (Get-SafeFileNamePart -Value $RunId)
+
+    $payload = @"
+nodeid=`$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac)
+target_url='$targetUrlShell'
+delay_seconds=$delaySeconds
+sleep "`$delay_seconds"
+start=`$(date +%s%N)
+wget_exit_file="/tmp/harvester-wget-exit-`$$.txt"
+wget_stderr_file="/tmp/ffmh-wget-stderr-$safeRunId-`$nodeid.log"
+rm -f "`$wget_exit_file" "`$wget_stderr_file"
+t0=`$(date +%s.%N)
+wget -O /dev/null -q -T $downloadTimeoutSeconds "`$target_url" 2>"`$wget_stderr_file" &
+wget_pid=`$!
+(
+    sleep $downloadTimeoutSeconds
+    if kill -0 "`$wget_pid" 2>/dev/null; then
+        kill "`$wget_pid" 2>/dev/null || true
+        sleep 1
+        kill -9 "`$wget_pid" 2>/dev/null || true
+        printf '%s' '124' > "`$wget_exit_file"
+    fi
+) &
+wget_watchdog_pid=`$!
+wait "`$wget_pid"
+wget_wait_exit=`$?
+kill "`$wget_watchdog_pid" 2>/dev/null || true
+wait "`$wget_watchdog_pid" 2>/dev/null || true
+if [ -f "`$wget_exit_file" ]; then
+    wget_exit=`$(cat "`$wget_exit_file" 2>/dev/null)
+else
+    wget_exit="`$wget_wait_exit"
+    printf '%s' "`$wget_exit" > "`$wget_exit_file"
+fi
+t1=`$(date +%s.%N)
+bytes=0
+if [ "`$wget_exit" = "0" ]; then
+    bytes="$targetBytes"
+fi
+rm -f "`$wget_exit_file"
+awk -v nodeid="`$nodeid" -v start="`$start" -v t0="`$t0" -v t1="`$t1" -v target="`$target_url" -v bytes="`$bytes" -v wget_exit="`$wget_exit" -v expected_bytes="$targetBytes" -v timeout_seconds="$downloadTimeoutSeconds" 'BEGIN{
+    sec=t1-t0
+    if (sec < 0) {
+        sec = 0
+    }
+    if (wget_exit != 0) {
+        kind = (wget_exit == 124) ? "speedtest_timeout" : "wget_failed"
+        printf "%s,nodeid=%s exit=%s bytes=%s sec=%.6f expected_bytes=%s timeout_seconds=%s target="%s" %s\n",kind,nodeid,wget_exit,bytes,sec,expected_bytes,timeout_seconds,target,start
+        exit 0
+    }
+    if (bytes <= 0 || sec <= 0) {
+        printf "speedtest_invalid,nodeid=%s bytes=%s sec=%.6f expected_bytes=%s timeout_seconds=%s target="%s" %s\n",nodeid,bytes,sec,expected_bytes,timeout_seconds,target,start
+        exit 0
+    }
+    if (bytes != expected_bytes) {
+        printf "speedtest_size_mismatch,nodeid=%s bytes=%s sec=%.6f expected_bytes=%s timeout_seconds=%s target="%s" %s\n",nodeid,bytes,sec,expected_bytes,timeout_seconds,target,start
+        exit 0
+    }
+    if (sec > timeout_seconds || (sec == timeout_seconds && (bytes != expected_bytes || wget_exit != 0))) {
+        printf "speedtest_timeout,nodeid=%s exit=%s bytes=%s sec=%.6f expected_bytes=%s timeout_seconds=%s target="%s" %s\n",nodeid,wget_exit,bytes,sec,expected_bytes,timeout_seconds,target,start
+        exit 0
+    }
+    printf "speedtest,nodeid=%s download_mbit=%.2f bytes=%s sec=%.6f timeout_seconds=%s,target="%s" %s\n",nodeid,(bytes*8)/(sec*1000000),bytes,sec,timeout_seconds,target,start
+}'
+"@
+
+    $diagnosticPayload = @"
+nodeid=`$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac)
+target_host='$targetHost'
+speedtest_delay_seconds=$delaySeconds
+diagnostic_delay_seconds=$diagnosticDelaySeconds
+sleep "`$diagnostic_delay_seconds"
+ts=`$(date +%s%N)
+wget_stderr_file="/tmp/ffmh-wget-stderr-$safeRunId-`$nodeid.log"
+gateway4=`$(ip route 2>/dev/null | awk '/^default / { print `$3; exit }')
+gateway6=`$(ip -6 route 2>/dev/null | awk '/^default / { print `$3; exit }')
+gateway_probe="`$gateway4"
+gateway_probe_kind='ipv4'
+if [ -z "`$gateway_probe" ] && [ -n "`$gateway6" ]; then
+    gateway_probe="`$gateway6"
+    gateway_probe_kind='ipv6'
+fi
+ping_gateway_loss='-1'
+if [ -n "`$gateway_probe" ]; then
+    if [ "`$gateway_probe_kind" = 'ipv6' ]; then
+        ping_gateway_output=`$(ping6 -q -c 4 -w 8 "`$gateway_probe" 2>&1 || true)
+    else
+        ping_gateway_output=`$(ping -q -c 4 -w 8 "`$gateway_probe" 2>&1 || true)
+    fi
+    ping_gateway_loss=`$(printf '%s\n' "`$ping_gateway_output" | awk -F', ' '/packet loss/ { gsub(/% packet loss/, "", `$3); print `$3; found=1; exit } END { if (!found) print "-1" }')
+fi
+ping_target_loss='-1'
+if [ -n "`$target_host" ]; then
+    ping_target_output=`$(ping -q -c 4 -w 8 "`$target_host" 2>&1 || true)
+    ping_target_loss=`$(printf '%s\n' "`$ping_target_output" | awk -F', ' '/packet loss/ { gsub(/% packet loss/, "", `$3); print `$3; found=1; exit } END { if (!found) print "-1" }')
+fi
+wget_stderr='unavailable'
+if [ -f "`$wget_stderr_file" ]; then
+    wget_stderr=`$(tr '\r\n' '  ' <"`$wget_stderr_file" | sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//; s/"//g')
+fi
+resolved_target_ipv4=''
+resolved_target_ipv6=''
+if command -v nslookup >/dev/null 2>&1; then
+    resolved_target_ipv4=`$(nslookup "`$target_host" 2>/dev/null | awk '/^Address [0-9]*: / { print `$3 } /^[Aa]ddress: / { print `$2 }' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+    resolved_target_ipv6=`$(nslookup "`$target_host" 2>/dev/null | awk '/^Address [0-9]*: / { print `$3 } /^[Aa]ddress: / { print `$2 }' | grep ':' | head -n 1)
+fi
+if [ -z "`$resolved_target_ipv4" ] && command -v getent >/dev/null 2>&1; then
+    resolved_target_ipv4=`$(getent ahostsv4 "`$target_host" 2>/dev/null | awk 'NR==1 { print `$1 }')
+fi
+if [ -z "`$resolved_target_ipv6" ] && command -v getent >/dev/null 2>&1; then
+    resolved_target_ipv6=`$(getent ahostsv6 "`$target_host" 2>/dev/null | awk 'NR==1 { print `$1 }')
+fi
+route_get_ipv4='unavailable'
+route_get_ipv6='unavailable'
+if [ -n "`$resolved_target_ipv4" ]; then
+    route_get_ipv4=`$(ip route get "`$resolved_target_ipv4" 2>&1 || true)
+fi
+if [ -n "`$resolved_target_ipv6" ]; then
+    route_get_ipv6=`$(ip -6 route get "`$resolved_target_ipv6" 2>&1 || true)
+fi
+route_get_ipv4=`$(printf '%s' "`$route_get_ipv4" | tr '\r\n' '  ' | sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//; s/"//g')
+route_get_ipv6=`$(printf '%s' "`$route_get_ipv6" | tr '\r\n' '  ' | sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//; s/"//g')
+load1='0'
+load5='0'
+load15='0'
+if [ -r /proc/loadavg ]; then
+    read load1 load5 load15 _ </proc/loadavg
+fi
+printf 'diagnostic,nodeid=%s target_host="%s" speedtest_delay_seconds=%s diagnostic_delay_seconds=%s timestamp=%s\n' "`$nodeid" "`$target_host" "`$speedtest_delay_seconds" "`$diagnostic_delay_seconds" "`$ts"
+printf 'diag_summary,load1=%s load5=%s load15=%s gateway_probe="%s" gateway_probe_kind="%s" ping_gateway_loss=%s ping_target_loss=%s target_ipv4="%s" target_ipv6="%s" route_get_ipv4="%s" route_get_ipv6="%s" wget_stderr="%s"\n' "`$load1" "`$load5" "`$load15" "`$gateway_probe" "`$gateway_probe_kind" "`$ping_gateway_loss" "`$ping_target_loss" "`$resolved_target_ipv4" "`$resolved_target_ipv6" "`$route_get_ipv4" "`$route_get_ipv6" "`$wget_stderr"
+echo 'diag_section,name=ip_route'
+ip route 2>&1 || true
+echo 'diag_section_end,name=ip_route'
+echo 'diag_section,name=ip6_route'
+ip -6 route 2>&1 || true
+echo 'diag_section_end,name=ip6_route'
+echo 'diag_section,name=target_resolution'
+if command -v nslookup >/dev/null 2>&1; then
+    nslookup "`$target_host" 2>&1 || true
+elif command -v getent >/dev/null 2>&1; then
+    getent ahosts "`$target_host" 2>&1 || true
+else
+    echo 'resolution tooling unavailable'
+fi
+echo 'diag_section_end,name=target_resolution'
+echo 'diag_section,name=route_get'
+if [ -n "`$resolved_target_ipv4" ]; then
+    ip route get "`$resolved_target_ipv4" 2>&1 || true
+else
+    echo 'ipv4 target unresolved'
+fi
+if [ -n "`$resolved_target_ipv6" ]; then
+    ip -6 route get "`$resolved_target_ipv6" 2>&1 || true
+else
+    echo 'ipv6 target unresolved'
+fi
+echo 'diag_section_end,name=route_get'
+echo 'diag_section,name=ip_addr'
+ip addr 2>&1 || true
+echo 'diag_section_end,name=ip_addr'
+echo 'diag_section,name=ip_link_stats'
+ip -s link 2>&1 || true
+echo 'diag_section_end,name=ip_link_stats'
+echo 'diag_section,name=loadavg'
+cat /proc/loadavg 2>&1 || true
+echo 'diag_section_end,name=loadavg'
+echo 'diag_section,name=meminfo_head'
+sed -n '1,5p' /proc/meminfo 2>&1 || true
+echo 'diag_section_end,name=meminfo_head'
+if command -v batctl >/dev/null 2>&1; then
+    echo 'diag_section,name=batctl_if'
+    batctl if 2>&1 || true
+    echo 'diag_section_end,name=batctl_if'
+    echo 'diag_section,name=batctl_n'
+    batctl n 2>&1 || true
+    echo 'diag_section_end,name=batctl_n'
+fi
+if command -v logread >/dev/null 2>&1; then
+    echo 'diag_section,name=logread_tail'
+    logread 2>&1 | tail -n 40 || true
+    echo 'diag_section_end,name=logread_tail'
+fi
+if command -v ubus >/dev/null 2>&1; then
+    echo 'diag_section,name=ubus_network_dump'
+    ubus call network.interface dump 2>&1 || true
+    echo 'diag_section_end,name=ubus_network_dump'
+    echo 'diag_section,name=ubus_ifstatus_wan'
+    ubus call network.interface.wan status 2>&1 || true
+    echo 'diag_section_end,name=ubus_ifstatus_wan'
+    echo 'diag_section,name=ubus_ifstatus_wan6'
+    ubus call network.interface.wan6 status 2>&1 || true
+    echo 'diag_section_end,name=ubus_ifstatus_wan6'
+fi
+rm -f "`$wget_stderr_file"
+"@
+
+    $remoteDirEscaped = Convert-ToShellSingleQuoted -Value $remoteRunDir
+    $probeCmd = @"
+find '$remoteDirEscaped' -maxdepth 1 -type f -name '*.txt' -print | sort | while IFS= read -r file; do
+    if grep -Eq '^(speedtest,nodeid=|wget_failed,nodeid=|speedtest_invalid,nodeid=|speedtest_size_mismatch,nodeid=|speedtest_timeout,nodeid=)' "`$file"; then
+        printf '%s\n' "`$file"
+        break
+    fi
+done
+"@
+    $output = & $Config.SshBinary @sshArgs $probeCmd 2>&1
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        return $false
+    }
+
+    $text = Convert-ToTrimmedString -Value ($output -join "`n")
+    return -not [string]::IsNullOrWhiteSpace($text)
+}
+
+function Get-FinishedNodeResultCountBatch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$RunId,
+        [Parameter(Mandatory = $true)]
+        [object[]]$Nodes
+    )
+
+    if (@($Nodes).Count -eq 0) {
+        return 0
+    }
+
+    $indexedNodes = for ($i = 0; $i -lt $Nodes.Count; $i++) {
+        [pscustomobject]@{
+            Index = $i
+            Node  = $Nodes[$i]
+        }
+    }
+
+    $parallelism = [Math]::Max(1, [int]([Math]::Min([Math]::Max(1, [int]$Config.CollectParallelism), $indexedNodes.Count)))
+    if ($parallelism -le 1 -or $indexedNodes.Count -le 1) {
+        return @($indexedNodes | Where-Object { Test-NodeResultFinished -Config $Config -RunId $RunId -Node $_.Node }).Count
+    }
+
+    $batchConfig = $Config
+    $batchRunId = $RunId
+    $modulePath = $script:ModuleFilePath
+    $ready = @(
+        $indexedNodes |
+            ForEach-Object -Parallel {
+                $item = $_
+                $config = $using:batchConfig
+                $runId = $using:batchRunId
+                $modulePath = $using:modulePath
+                Import-Module $modulePath -Force | Out-Null
+                if (Test-NodeResultFinished -Config $config -RunId $runId -Node $item.Node) {
+                    $item.Index
+                }
+            } -ThrottleLimit $parallelism
+    )
+
+    return @($ready).Count
+}
+
+function Get-NodeTriggerAssignmentOrderKey {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RunId,
+        [Parameter(Mandatory = $true)]
+        [object]$Node
+    )
+
+    $seed = @(
+        $RunId,
+        (Convert-ToTrimmedString -Value $Node.DeviceID),
+        (Convert-ToTrimmedString -Value $Node.IP),
+        (Convert-ToTrimmedString -Value $Node.Name)
+    ) -join '|'
+
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($seed)
+    $hashBytes = [System.Security.Cryptography.SHA256]::HashData($bytes)
+    return [Convert]::ToHexString($hashBytes)
+}
+
+function Get-NodeTriggerAssignments {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$RunId,
+        [Parameter(Mandatory = $true)]
+        [object[]]$Nodes
+    )
+
+    if (@($Nodes).Count -eq 0) {
+        return @()
+    }
+
+    $indexedNodes = for ($i = 0; $i -lt $Nodes.Count; $i++) {
+        [pscustomobject]@{
+            Index = $i
+            Node  = $Nodes[$i]
+        }
+    }
+
+    $delayMaxSeconds = [Math]::Max(0, [int]$Config.TriggerRandomDelayMaxSeconds)
+    $throughputByIp = Get-LatestThroughputByIp -Config $Config
+    $delayByIndex = @{}
+
+    foreach ($item in $indexedNodes) {
+        $delayByIndex[$item.Index] = 0
+    }
+
+    if ($delayMaxSeconds -le 0) {
+        return @(
+            $indexedNodes |
+                ForEach-Object {
+                    [pscustomobject]@{
+                        Index                = $_.Index
+                        Node                 = $_.Node
+                        AssignedDelaySeconds = 0
+                    }
+                }
+        )
+    }
+
+    $orderedNodes = @(
+        $indexedNodes |
+            ForEach-Object {
+                $ip = Convert-ToTrimmedString -Value $_.Node.IP
+                $latestThroughput = 0.0
+                if (-not [string]::IsNullOrWhiteSpace($ip) -and $throughputByIp.ContainsKey($ip)) {
+                    $latestThroughput = [double]$throughputByIp[$ip]
+                }
+
+                [pscustomobject]@{
+                    Index            = $_.Index
+                    Node             = $_.Node
+                    LatestThroughput = $latestThroughput
+                }
+            } |
+            Sort-Object @{ Expression = { $_.LatestThroughput } }, @{ Expression = { Get-NodeTriggerAssignmentOrderKey -RunId $RunId -Node $_.Node } }, @{ Expression = { $_.Index } }
+    )
+
+    if ($orderedNodes.Count -gt 0) {
+        for ($rank = 0; $rank -lt $orderedNodes.Count; $rank++) {
+            $assignedDelay = if ($orderedNodes.Count -eq 1) {
+                0
+            }
+            else {
+                $rawDelay = [int][Math]::Round((($rank * $delayMaxSeconds) / [double]($orderedNodes.Count - 1)), [System.MidpointRounding]::AwayFromZero)
+                [Math]::Max(0, [Math]::Min($delayMaxSeconds, $rawDelay))
+            }
+
+            $delayByIndex[$orderedNodes[$rank].Index] = $assignedDelay
+        }
+    }
+
+    return @(
+        $indexedNodes |
+            ForEach-Object {
+                [pscustomobject]@{
+                    Index                = $_.Index
+                    Node                 = $_.Node
+                    AssignedDelaySeconds = $delayByIndex[$_.Index]
+                }
+            }
+    )
+}
+
+
+function Get-NodeDiagnosticsSettings {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config
+    )
+
+    $enabled = if ($Config.ContainsKey('EnableNodeDiagnostics')) { [bool]$Config.EnableNodeDiagnostics } else { $true }
+    $delaySeconds = if ($Config.ContainsKey('NodeDiagnosticsDelaySeconds')) { [Math]::Max(0, [int]$Config.NodeDiagnosticsDelaySeconds) } else { 60 }
+
+    return [pscustomobject]@{
+        Enabled           = $enabled
+        DelaySeconds      = $delaySeconds
+    }
+}
+
+function Get-NodeDiagnosticsTargetHost {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config
+    )
+
+    $uri = $null
+    if (-not [uri]::TryCreate((Convert-ToTrimmedString -Value $Config.SpeedtestTargetUrl), [System.UriKind]::Absolute, [ref]$uri)) {
+        return ''
+    }
+
+    return $uri.Host
+}
+
+function Get-NodeTriggerCommandInfo {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$RunId,
+        [Parameter(Mandatory = $true)]
+        [int]$AssignedDelaySeconds
+    )
+
+    $remoteRunDir = Get-RemoteRunResultDir -Config $Config -RunId $RunId
+    $remoteResultPattern = "$remoteRunDir/*.txt"
+
+    $delaySeconds = [Math]::Max(0, [int]$AssignedDelaySeconds)
+    $targetUrl = Convert-ToTrimmedString -Value $Config.SpeedtestTargetUrl
+    $targetUrlShell = Convert-ToShellSingleQuoted -Value $targetUrl
+    $targetBytes = [Math]::Max(1, [int64]$Config.SpeedtestTargetBytes)
+    $downloadTimeoutSeconds = if ($Config.ContainsKey('SpeedtestDownloadTimeoutSeconds')) { [Math]::Max(1, [int]$Config.SpeedtestDownloadTimeoutSeconds) } else { 480 }
+    $diagnostics = Get-NodeDiagnosticsSettings -Config $Config
+    $diagnosticDelaySeconds = $delaySeconds + $diagnostics.DelaySeconds
+    $targetHost = Convert-ToShellSingleQuoted -Value (Get-NodeDiagnosticsTargetHost -Config $Config)
+    $safeRunId = Convert-ToShellSingleQuoted -Value (Get-SafeFileNamePart -Value $RunId)
 
     $payload = @"
 nodeid=`$(tr -d ':' </lib/gluon/core/sysconfig/primary_mac)
@@ -950,6 +1375,43 @@ function ConvertFrom-MeasurementOutput {
     return $null
 }
 
+function Get-NodeDiagnosticSections {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Lines
+    )
+
+    $sections = @{}
+    $currentName = ''
+    $buffer = New-Object System.Collections.Generic.List[string]
+
+    foreach ($line in $Lines) {
+        $trimmed = Convert-ToTrimmedString -Value $line
+        if ($trimmed -match '^diag_section,name=(?<name>.+)$') {
+            $currentName = $Matches['name']
+            $buffer = New-Object System.Collections.Generic.List[string]
+            continue
+        }
+
+        if ($trimmed -match '^diag_section_end,name=(?<name>.+)$') {
+            if (-not [string]::IsNullOrWhiteSpace($currentName) -and $currentName -eq $Matches['name']) {
+                $sections[$currentName] = (@($buffer) -join "`n")
+            }
+
+            $currentName = ''
+            $buffer = New-Object System.Collections.Generic.List[string]
+            continue
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($currentName)) {
+            $buffer.Add($trimmed)
+        }
+    }
+
+    return $sections
+}
+
 function ConvertFrom-NodeDiagnosticOutput {
     [CmdletBinding()]
     param(
@@ -963,16 +1425,16 @@ function ConvertFrom-NodeDiagnosticOutput {
     }
 
     $headerRegex = '^diagnostic,nodeid=(?<nodeid>[^ ]+) target_host="(?<target>[^"]*)" speedtest_delay_seconds=(?<speedtest_delay>-?[0-9]+) diagnostic_delay_seconds=(?<diag_delay>-?[0-9]+) timestamp=(?<timestamp>[0-9]+)$'
-    $summaryRegex = '^diag_summary,load1=(?<load1>-?[0-9]+(?:\.[0-9]+)?) load5=(?<load5>-?[0-9]+(?:\.[0-9]+)?) load15=(?<load15>-?[0-9]+(?:\.[0-9]+)?) gateway_probe="(?<gateway>[^"]*)" gateway_probe_kind="(?<gateway_kind>[^"]*)" ping_gateway_loss=(?<gateway_loss>-?[0-9]+(?:\.[0-9]+)?) ping_target_loss=(?<target_loss>-?[0-9]+(?:\.[0-9]+)?)$'
 
     $lines = @(
-        $RawOutput -split '\r?\n' |
+        $RawOutput -split '?
+' |
             ForEach-Object { Convert-ToTrimmedString -Value $_ } |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     )
 
     $headerMatch = $null
-    $summaryMatch = $null
+    $summaryValues = @{}
     foreach ($line in $lines) {
         if ($null -eq $headerMatch) {
             $candidate = [regex]::Match($line, $headerRegex)
@@ -982,17 +1444,25 @@ function ConvertFrom-NodeDiagnosticOutput {
             }
         }
 
-        if ($null -eq $summaryMatch) {
-            $candidate = [regex]::Match($line, $summaryRegex)
-            if ($candidate.Success) {
-                $summaryMatch = $candidate
+        if ($line.StartsWith('diag_summary,')) {
+            foreach ($pair in [regex]::Matches($line.Substring(13), '(?<key>[a-z0-9_]+)=(?:"(?<quoted>[^"]*)"|(?<bare>[^ ]+))')) {
+                if ($pair.Groups['quoted'].Success) {
+                    $value = $pair.Groups['quoted'].Value
+                }
+                else {
+                    $value = $pair.Groups['bare'].Value
+                }
+
+                $summaryValues[$pair.Groups['key'].Value] = $value
             }
         }
     }
 
-    if ($null -eq $headerMatch -or $null -eq $summaryMatch) {
+    if ($null -eq $headerMatch -or $summaryValues.Count -eq 0) {
         return $null
     }
+
+    $sections = Get-NodeDiagnosticSections -Lines $lines
 
     return [pscustomobject]@{
         NodeId                 = $headerMatch.Groups['nodeid'].Value
@@ -1000,13 +1470,22 @@ function ConvertFrom-NodeDiagnosticOutput {
         SpeedtestDelaySeconds  = [int]$headerMatch.Groups['speedtest_delay'].Value
         DiagnosticDelaySeconds = [int]$headerMatch.Groups['diag_delay'].Value
         TimestampNs            = $headerMatch.Groups['timestamp'].Value
-        GatewayProbe           = $summaryMatch.Groups['gateway'].Value
-        GatewayProbeKind       = $summaryMatch.Groups['gateway_kind'].Value
-        PingGatewayLossPct     = [double]::Parse($summaryMatch.Groups['gateway_loss'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
-        PingTargetLossPct      = [double]::Parse($summaryMatch.Groups['target_loss'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
-        Load1                  = [double]::Parse($summaryMatch.Groups['load1'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
-        Load5                  = [double]::Parse($summaryMatch.Groups['load5'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
-        Load15                 = [double]::Parse($summaryMatch.Groups['load15'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
+        GatewayProbe           = if ($summaryValues.ContainsKey('gateway_probe')) { $summaryValues['gateway_probe'] } else { '' }
+        GatewayProbeKind       = if ($summaryValues.ContainsKey('gateway_probe_kind')) { $summaryValues['gateway_probe_kind'] } else { '' }
+        PingGatewayLossPct     = if ($summaryValues.ContainsKey('ping_gateway_loss')) { [double]::Parse($summaryValues['ping_gateway_loss'], [System.Globalization.CultureInfo]::InvariantCulture) } else { -1 }
+        PingTargetLossPct      = if ($summaryValues.ContainsKey('ping_target_loss')) { [double]::Parse($summaryValues['ping_target_loss'], [System.Globalization.CultureInfo]::InvariantCulture) } else { -1 }
+        Load1                  = if ($summaryValues.ContainsKey('load1')) { [double]::Parse($summaryValues['load1'], [System.Globalization.CultureInfo]::InvariantCulture) } else { 0 }
+        Load5                  = if ($summaryValues.ContainsKey('load5')) { [double]::Parse($summaryValues['load5'], [System.Globalization.CultureInfo]::InvariantCulture) } else { 0 }
+        Load15                 = if ($summaryValues.ContainsKey('load15')) { [double]::Parse($summaryValues['load15'], [System.Globalization.CultureInfo]::InvariantCulture) } else { 0 }
+        TargetIPv4             = if ($summaryValues.ContainsKey('target_ipv4')) { $summaryValues['target_ipv4'] } else { '' }
+        TargetIPv6             = if ($summaryValues.ContainsKey('target_ipv6')) { $summaryValues['target_ipv6'] } else { '' }
+        RouteGetIPv4           = if ($summaryValues.ContainsKey('route_get_ipv4')) { $summaryValues['route_get_ipv4'] } else { '' }
+        RouteGetIPv6           = if ($summaryValues.ContainsKey('route_get_ipv6')) { $summaryValues['route_get_ipv6'] } else { '' }
+        WgetStderr             = if ($summaryValues.ContainsKey('wget_stderr')) { $summaryValues['wget_stderr'] } else { '' }
+        TargetResolution       = if ($sections.ContainsKey('target_resolution')) { $sections['target_resolution'] } else { '' }
+        RouteGet               = if ($sections.ContainsKey('route_get')) { $sections['route_get'] } else { '' }
+        UbusNetworkDump        = if ($sections.ContainsKey('ubus_network_dump')) { $sections['ubus_network_dump'] } else { '' }
+        UbusIfstatusWan        = if ($sections.ContainsKey('ubus_ifstatus_wan')) { $sections['ubus_ifstatus_wan'] } else { '' }
+        UbusIfstatusWan6       = if ($sections.ContainsKey('ubus_ifstatus_wan6')) { $sections['ubus_ifstatus_wan6'] } else { '' }
     }
 }
-
