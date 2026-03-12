@@ -202,7 +202,7 @@ function Start-MeasurementRun {
     }
 }
 
-function Get-LatestThroughputByIp {
+function Get-RecentAverageThroughputByIp {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -210,6 +210,8 @@ function Get-LatestThroughputByIp {
     )
 
     $throughputByIp = @{}
+    $throughputSumByIp = @{}
+    $sampleCountByIp = @{}
     $dbPath = if ($Config.ContainsKey('DatabasePath')) { Convert-ToTrimmedString -Value $Config.DatabasePath } else { '' }
     $sqliteBinary = if ($Config.ContainsKey('SQLiteBinary')) { Convert-ToTrimmedString -Value $Config.SQLiteBinary } else { '' }
 
@@ -231,7 +233,7 @@ ORDER BY ip ASC, COALESCE(NULLIF(measured_at_utc, ''), collected_at_utc, '') DES
         }
 
         $ip = Convert-ToTrimmedString -Value $parts[0]
-        if ([string]::IsNullOrWhiteSpace($ip) -or $throughputByIp.ContainsKey($ip)) {
+        if ([string]::IsNullOrWhiteSpace($ip)) {
             continue
         }
 
@@ -241,7 +243,21 @@ ORDER BY ip ASC, COALESCE(NULLIF(measured_at_utc, ''), collected_at_utc, '') DES
             [double]::TryParse($rawThroughput, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$throughput) | Out-Null
         }
 
-        $throughputByIp[$ip] = $throughput
+        if (-not $sampleCountByIp.ContainsKey($ip)) {
+            $sampleCountByIp[$ip] = 0
+            $throughputSumByIp[$ip] = 0.0
+        }
+
+        if ($sampleCountByIp[$ip] -ge 7) {
+            continue
+        }
+
+        $sampleCountByIp[$ip]++
+        $throughputSumByIp[$ip] += $throughput
+    }
+
+    foreach ($ip in $sampleCountByIp.Keys) {
+        $throughputByIp[$ip] = $throughputSumByIp[$ip] / [double]$sampleCountByIp[$ip]
     }
 
     return $throughputByIp
@@ -450,11 +466,3 @@ function Add-NodeJobRecord {
 
     Invoke-Sqlite -Config $Config -Sql $sql | Out-Null
 }
-
-
-
-
-
-
-
-

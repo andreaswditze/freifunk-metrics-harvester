@@ -574,6 +574,83 @@ Describe 'Initialize-Database and Save-Measurement' {
     }
 }
 
+Describe 'Get-RecentAverageThroughputByIp' {
+    It 'averages the latest up to seven throughput values per ip' {
+        InModuleScope FreifunkMetrics {
+            $baseDir = Join-Path $TestDrive 'db-recent-throughput-average'
+            New-Item -ItemType Directory -Path $baseDir -Force | Out-Null
+
+            $config = @{
+                DatabasePath = (Join-Path $baseDir 'metrics.db')
+                SQLiteBinary = 'sqlite3'
+                LogDir = $baseDir
+            }
+            $nodeA = [pscustomobject]@{
+                DeviceID = 'node-a'
+                Name = 'Node A'
+                IP = '2a03:2260::a'
+                Domain = 'dom-a'
+            }
+            $nodeB = [pscustomobject]@{
+                DeviceID = 'node-b'
+                Name = 'Node B'
+                IP = '2a03:2260::b'
+                Domain = 'dom-b'
+            }
+
+            Mock Write-Log {}
+
+            Initialize-Database -Config $config
+
+            foreach ($i in 1..8) {
+                $throughput = [double]$i
+                $parsed = [pscustomobject]@{
+                    NodeId = 'nodeid-a'
+                    ThroughputMbit = $throughput
+                    Target = 'https://example.invalid/test.bin'
+                    TimestampNs = [string](1000 + $i)
+                    ResultType = 'success'
+                    FailureReason = ''
+                    DownloadedBytes = 104857600
+                    ExpectedBytes = 104857600
+                    DownloadDurationSeconds = 10.0
+                    TimeoutSeconds = 180
+                    WgetExitCode = 0
+                    WgetExitReason = 'success'
+                    WgetStderr = ''
+                }
+
+                Save-Measurement -Config $config -Node $nodeA -RunId ("run-a-{0}" -f $i) -RawOutput ("speedtest,nodeid=nodeid-a download_mbit={0} bytes=104857600 sec=10.0 timeout_seconds=180,target=""https://example.invalid/test.bin"" {1}" -f $throughput, (1000 + $i)) -ParsedMeasurement $parsed
+            }
+
+            foreach ($i in 1..3) {
+                $throughput = [double](10 * $i)
+                $parsed = [pscustomobject]@{
+                    NodeId = 'nodeid-b'
+                    ThroughputMbit = $throughput
+                    Target = 'https://example.invalid/test.bin'
+                    TimestampNs = [string](2000 + $i)
+                    ResultType = 'success'
+                    FailureReason = ''
+                    DownloadedBytes = 104857600
+                    ExpectedBytes = 104857600
+                    DownloadDurationSeconds = 10.0
+                    TimeoutSeconds = 180
+                    WgetExitCode = 0
+                    WgetExitReason = 'success'
+                    WgetStderr = ''
+                }
+
+                Save-Measurement -Config $config -Node $nodeB -RunId ("run-b-{0}" -f $i) -RawOutput ("speedtest,nodeid=nodeid-b download_mbit={0} bytes=104857600 sec=10.0 timeout_seconds=180,target=""https://example.invalid/test.bin"" {1}" -f $throughput, (2000 + $i)) -ParsedMeasurement $parsed
+            }
+
+            $averages = Get-RecentAverageThroughputByIp -Config $config
+
+            $averages['2a03:2260::a'] | Should -Be 5
+            $averages['2a03:2260::b'] | Should -Be 20
+        }
+    }
+}
 Describe 'ConvertFrom-NodeDiagnosticOutput' {
     It 'parses diagnostic summary payloads' {
         $raw = @(
@@ -931,7 +1008,7 @@ Describe 'Get-NodeTriggerAssignments' {
             )
 
             Mock Get-Date { [datetime]'2026-03-11T12:00:00' }
-            Mock Get-LatestThroughputByIp {
+            Mock Get-RecentAverageThroughputByIp {
                 @{
                     '2a03:2260::2' = 0.0
                     '2a03:2260::3' = 20.0
@@ -963,7 +1040,7 @@ Describe 'Get-NodeTriggerAssignments' {
             )
 
             Mock Get-Date { [datetime]'2026-03-12T12:00:00' }
-            Mock Get-LatestThroughputByIp {
+            Mock Get-RecentAverageThroughputByIp {
                 @{
                     '2a03:2260::20' = 5.0
                     '2a03:2260::3' = 90.0
@@ -995,7 +1072,7 @@ Describe 'Get-NodeTriggerAssignments' {
                 [pscustomobject]@{ DeviceID = 'node-004'; Name = 'Node 4'; IP = '2a03:2260::4'; Domain = 'dom-a' }
             )
 
-            Mock Get-LatestThroughputByIp { @{} }
+            Mock Get-RecentAverageThroughputByIp { @{} }
 
             $assignedDelays = @(Get-NodeTriggerAssignments -Config $config -RunId 'run-a' -Nodes $nodes | ForEach-Object { $_.AssignedDelaySeconds } | Sort-Object)
 

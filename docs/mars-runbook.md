@@ -107,7 +107,7 @@ pwsh ./src/collect-node-metrics.ps1 -ConfigPath ./src/config.production.ps1
 Operational flow:
 - Trigger phase runs in parallel up to `TriggerParallelism`.
 - Each node receives a controller-assigned download delay between `0` and `TriggerRandomDelayMaxSeconds` seconds.
-- On odd ISO weekdays, delays follow ascending last-known throughput; on even ISO weekdays, they follow ascending node ID.
+- On odd ISO weekdays, delays follow ascending average throughput across the latest up to 7 measurements per node IP; on even ISO weekdays, they follow ascending node ID.
 - The weekday alternation avoids the same mesh-cluster neighbors always starting together and gives recurring anomalies a chance to show up under different start offsets.
 - After trigger completion, the collector waits and polls for up to `TriggerRandomDelayMaxSeconds + CollectWaitTimeoutSeconds`.
 - Collect phase reconnects only to successfully triggered nodes and runs in parallel up to `CollectParallelism`.
@@ -157,4 +157,3 @@ pwsh ./tests/Invoke-Tests.ps1 -OutputFormat NUnitXml -OutputPath ./temp/test-res
   check `UseTestNodeIPs` versus Excel settings and inspect the startup config summary log.
 - Repeated `collect_pending` entries:
   increase `TriggerRandomDelayMaxSeconds` only if you also accept the doubled wait before collect, or reduce it if nodes finish too late for the current workflow.
-

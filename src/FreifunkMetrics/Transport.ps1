@@ -330,7 +330,7 @@ function Get-NodeTriggerAssignments {
     }
 
     $delayMaxSeconds = [Math]::Max(0, [int]$Config.TriggerRandomDelayMaxSeconds)
-    $throughputByIp = Get-LatestThroughputByIp -Config $Config
+    $throughputByIp = Get-RecentAverageThroughputByIp -Config $Config
     $delayByIndex = @{}
 
     foreach ($item in $indexedNodes) {
@@ -359,7 +359,7 @@ function Get-NodeTriggerAssignments {
     }
     else {
         @(
-            @{ Expression = { $_.LatestThroughput } },
+            @{ Expression = { $_.AverageThroughput } },
             @{ Expression = { Get-NodeTriggerAssignmentOrderKey -RunId $RunId -Node $_.Node } },
             @{ Expression = { $_.Index } }
         )
@@ -369,15 +369,15 @@ function Get-NodeTriggerAssignments {
         $indexedNodes |
             ForEach-Object {
                 $ip = Convert-ToTrimmedString -Value $_.Node.IP
-                $latestThroughput = 0.0
+                $averageThroughput = 0.0
                 if (-not [string]::IsNullOrWhiteSpace($ip) -and $throughputByIp.ContainsKey($ip)) {
-                    $latestThroughput = [double]$throughputByIp[$ip]
+                    $averageThroughput = [double]$throughputByIp[$ip]
                 }
 
                 [pscustomobject]@{
                     Index            = $_.Index
                     Node             = $_.Node
-                    LatestThroughput = $latestThroughput
+                    AverageThroughput = $averageThroughput
                 }
             } |
             Sort-Object $sortProperties
@@ -1656,8 +1656,3 @@ rm -f "`$wget_stderr_file"
         DiagnosticDelaySeconds = $diagnosticDelaySeconds
     }
 }
-
-
-
-
-
